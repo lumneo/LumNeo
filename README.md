@@ -134,7 +134,7 @@ python main.py
 目前支持 Windows 一键构建，其他系统请参考 PyInstaller 文档自行配置：
 ```bash
 # Windows
-./build.bat
+build.bat
 ```
 
 ---

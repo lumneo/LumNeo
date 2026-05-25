@@ -7,16 +7,17 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-backend/__pycache__
-backend/core/__pycache__
-backend/modules/__pycache__
-backend/error-log
-backend/token.json
 build
 dist
 temp
 data
 workspace
+
+backend/__pycache__
+backend/core/__pycache__
+backend/modules/__pycache__
+backend/error-log
+backend/token.json
 
 frontend/node_modules
 frontend/dist
@@ -28,8 +29,6 @@ frontend/stats.html
 frontend/package-lock.json
 *.local
 
-uploads
-lumneo.db
 mcp_config.json
 *.spec
 
