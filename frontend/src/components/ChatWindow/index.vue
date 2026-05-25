@@ -149,7 +149,7 @@
           <!-- 消息列表 -->
           <div class="message-container" ref="messageListRef">
             <div class="introduction" v-if="!chatStore.activeChatId">
-              <TypingText @click="sidebarOpen=true;sidebarCollapsed=false" />
+              <Introduction @click="sidebarOpen=true;sidebarCollapsed=false" />
             </div>
             <div class="message-main" v-else>
               <div v-if="showWelcome && currentMessages.length === 0">
@@ -335,10 +335,10 @@ import { useChatStore } from '@/stores/chat'
 import { useConfigStore, fileConfig } from '@/stores/config'
 import { useProfileStore } from '@/stores/profiles'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
-import svgWelcome from '@/components/svg-components/svgWelcome.vue'
-import svgLoading from '@/components/svg-components/svgLoading.vue'
-import TypingText from '@/components/typingText.vue'
-import mSvg from '@/components/mSvg.vue'
+import svgWelcome from '@/components-svg/svgWelcome.vue'
+import svgLoading from '@/components-svg/svgLoading.vue'
+import Introduction from '@/components/Introduction.vue'
+import mSvg from '@/components/MSvg.vue'
 
 import { useTheme } from '@/composables/useTheme'
 import { useModel } from '@/composables/useModel'

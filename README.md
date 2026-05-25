@@ -1,4 +1,15 @@
-# ✨ LumNeo — 点亮灵感的 AI 桌面伙伴
+这份 README 文档的基础非常棒，文案既有温度又突出了核心卖点！我帮你对内容进行了**补全和优化**。
+
+主要的改动点如下：
+1. **增加了“项目愿景与路线图”板块**：把你提到的 2.0 数字生命体和硬件接入规划优雅地融入进去，展示项目的宏大前景。
+2. **优化了“项目结构”的展示**：对 MCP 服务部分做了模糊处理，既展示了架构，又保护了你的核心私有代码。
+3. **补充了环境准备说明**：在快速开始前提醒用户需要 Node.js 和 Python 环境，避免新手踩坑。
+4. **微调了排版和语气**：让整体阅读体验更流畅、专业。
+
+你可以直接复制以下内容覆盖你的 `README.md`：
+
+```markdown
+#  LumNeo — 点亮灵感的 AI 桌面伙伴
 
 > 不是冰冷的工具，是悄悄懂你的那束光 (◕ᴗ◕✿)
 
@@ -11,27 +22,27 @@ LumNeo 是一款跨平台 AI 桌面应用，将**本地隐私**与**云端算力
 
 ---
 
-## 🌟 为什么选择 LumNeo？
+##  为什么选择 LumNeo？
 
-### 🎭 万千角色，一键切换
+###  万千角色，一键切换
 - **自由创建专属角色**：定义独特人格、Prompt 与能力边界
 - **独立工具绑定**：为每个角色配置专属 MCP 服务与本地工具白名单
 - **无缝切换**：上一秒是代码审查员，下一秒变文案编辑，专业的人做专业的事
 
-### 📂 文件读写，如臂使指
+###  文件读写，如臂使指
 - **拖拽即解析**：图片供视觉模型理解，文档自动提取结构与细节
 - **直接写入结果**：提出修改需求后，AI 可直接生成并保存文件，无需手动复制粘贴
 
-### 🧠 双擎驱动，懂你所想
+###  双擎驱动，懂你所想
 - **本地模型**：Ollama / LM Studio 离线运行，隐私数据不出本机
 - **云端大模型**：OpenAI / DeepSeek 等一键接入，破解复杂难题
 - **思考过程透明**：推理内容可折叠展示，思考耗时一目了然
 
-### 🔌 MCP 生态，无限延伸
+###  MCP 生态，无限延伸
 - 动态工具调用，内置文件读写、天气查询等常用能力
 - 支持自定义 MCP 服务器（stdio / SSE / streamable-http），打破桌面应用孤岛
 
-### 💫 细节之处，皆是温度
+###  细节之处，皆是温度
 - **流式对话 + 富文本**：回复逐字浮现，Markdown 实时渲染，代码高亮 + Mermaid 图表
 - **暗色 / 浅色主题**：炫酷边框微光、果冻弹性动效，视觉舒适不疲劳
 - **会话管理**：新建、重命名、删除对话，历史消息持久化存储
@@ -39,7 +50,19 @@ LumNeo 是一款跨平台 AI 桌面应用，将**本地隐私**与**云端算力
 
 ---
 
-## 🧱 技术栈
+##  项目愿景与路线图
+
+LumNeo 不仅仅是一个生产力工具，我还准备打造一个不断进化的**数字生命体**。
+
+| 阶段 | 版本 | 核心目标 | 状态 |
+| :--- | :--- | :--- | :--- |
+| **Phase 1** | **v1.0 (当前)** | **极致生产力底座**<br>实现多模态交互基础，开放 MCP 接口生态，打造最强本地 AI 助手。 |  已发布 |
+| **Phase 2** | **v2.0** | **进化为“数字生命体”**<br>赋予 AI 长期记忆、个性化性格与主动服务能力，让它从工具变为真正的伙伴。 |  规划中 |
+| **Phase 3** | **Future** | **打破虚实边界**<br>接入多模态感知（视觉、语音）与 IoT 硬件控制，实现真正的 AIoT 智能交互（现实版贾维斯）。 |  规划中 |
+
+---
+
+##  技术栈
 
 | 层级 | 技术选型 | 说明 |
 |------|----------|------|
@@ -53,62 +76,80 @@ LumNeo 是一款跨平台 AI 桌面应用，将**本地隐私**与**云端算力
 
 ---
 
-## 📁 项目结构
+##  项目主要结构
 
 ```text
 LumNeo/
+├── app_config.yaml         # 应用配置文件
+├── build.bat               # Windows 构建脚本
 ├── main.py                 # 应用入口（启动 FastAPI + PyWebView）
-├── mcp_config.json         # MCP 服务器配置文件
+├── mcp_config.json         # MCP 服务器配置文件 (运行时自动创建)
 ├── requirements.txt        # Python 依赖清单
+├── system_prompt.md        # 系统内置角色 Prompt 模板
+├── tools_config.yaml       # 本地工具配置文件
 ├── backend/
 │   ├── database.py         # SQLite 初始化与会话管理
 │   ├── mcp_client.py       # MCP 客户端管理器（多角色工具隔离）
 │   ├── routes/
 │   │   ├── chat.py         # 聊天接口（流式输出、工具调用）
 │   │   └── chats.py        # 对话 CRUD 接口
-│   └── services/
-│       ├── llm_service.py  # 大模型调用服务（含工具循环与角色上下文）
-│       └── tools.py        # 本地工具定义与执行引擎
+│   ├── services/
+│   |   ├── llm_service.py  # 大模型调用服务（含工具循环与角色上下文）
+│   |   └── tools.py        # 本地工具动态导入定义与执行引擎
+│   └── system_tools/
+|       ├── __init__.py     # 系统内置工具定义
+|       └── ...             # 其他通用基础工具
 ├── frontend/               # Vue 3 前端
 │   ├── src/
-│   │   ├── components/     # ChatWindow / SettingsDrawer / RoleSelector
-│   │   ├── stores/         # chat.ts / config.ts / role.ts
+│   │   ├── components/     # ChatWindow / SettingsDrawer / Introduction
+│   │   ├── stores/         # chat.ts / config.ts / profiles.ts
 │   │   ├── assets/         # global.css / 主题变量
 │   │   └── main.ts
 │   └── package.json
-└── data/                   # 数据库文件（自动生成，勿手动修改）
 ```
 
 ---
 
-## 🚀 快速开始
+## ️ 快速开始
+
+在开始之前，请确保你的电脑已安装 **Python 3.12+** 和 **Node.js 18+**。
 
 ### 1. 安装后端依赖
 ```bash
+conda create -n lumneo python=3.12
+conda activate lumneo
 pip install -r requirements.txt
 ```
 
-### 2. 构建前端
+### 2. 安装前端依赖
 ```bash
 cd frontend
 npm install
-npm run build
-cd ..
 ```
 
-### 3. 启动应用
+### 3. 开发模式下启动应用
+建议打开两个终端窗口分别运行前后端：
+
 ```bash
+# 终端 1：启动前端开发服务器
+cd frontend && npm run dev
+
+# 终端 2：启动后端服务
 python main.py
+
+# 提示：如果只需要测试 API 不需要 GUI 界面，可以使用 python main.py --no-gui
 ```
 
-### 🛠️ 开发模式
-- **后端**：`python main.py`（默认端口 8080）
-- **前端**：`cd frontend && npm run dev`（默认端口 5173）
-- **热加载**：在 `main.py` 中将 `url` 改为 `http://localhost:5173` 即可实时预览前端改动
+### 4. 构建可执行文件
+目前支持 Windows 一键构建，其他系统请参考 PyInstaller 文档自行配置：
+```bash
+# Windows
+./build.bat
+```
 
 ---
 
-## ⚙️ 配置 MCP 服务器
+## ️ 配置 MCP 服务器
 
 编辑根目录 `mcp_config.json` 即可为角色接入外部工具：
 
@@ -125,12 +166,18 @@ python main.py
   }
 }
 ```
+> 💡 **开发与打包环境的区别**：
+> *   **开发模式下**：直接修改项目根目录的 `mcp_config.json` 即可生效。
+> *   **打包运行 (.exe) 时**：为了符合系统规范，配置文件会自动生成并存储在系统的程序数据目录下。如果你使用的是打包后的版本，请前往以下路径修改配置：
+>     *   Windows: `C:\ProgramData\.LumNeo\mcp_config.json`
 
-> 💡 支持 `stdio`、`sse`、`streamable-http` 三种传输方式，可在角色设置中为不同角色绑定不同的 MCP 服务组合。
+
+
+>  **提示**：LumNeo 支持 `stdio`、`sse`、`streamable-http` 三种传输方式。你可以在角色设置中为不同角色绑定不同的 MCP 服务组合，打造专属工作流。
 
 ---
 
-## 🖼️ 界面预览
+## ️ 界面预览
 
 | 深色主题 | 浅色主题 |
 |---------|---------|
@@ -140,18 +187,22 @@ python main.py
 
 ---
 
-## 🤝 参与贡献
+##  参与贡献
 
 欢迎提 Issue、Pull Request，或分享你的角色配置与 MCP 工具。  
-LumNeo 因你而更温暖，每一行代码都是点亮灵感的光 ✨
+LumNeo 因你而更温暖，每一行代码都是点亮灵感的光 
 
 ---
 
-## 📄 开源许可
+##  开源许可
 
-[MIT License](LICENSE)
+本项目基于 [Apache License 2.0](./LICENSE) 开源。
+
+Copyright © 2026 [柯一_-](https://github.com/lumneo)
 
 ---
 
 *LumNeo — 点亮每个想要被看见的瞬间。*  
 *让我，做你桌面上那盏不灭的灵感之灯。*
+```
+

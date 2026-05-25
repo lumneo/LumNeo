@@ -189,7 +189,7 @@ import {
 import { useChatStore } from '@/stores/chat'
 import { useConfigStore, type ModelConfig } from '@/stores/config'
 import { useProfileStore, type Profile } from '@/stores/profiles'
-import mSvg from '@/components/mSvg.vue'
+import mSvg from '@/components/MSvg.vue'
 
 
 const props = defineProps<{ show: boolean }>()
