@@ -83,6 +83,10 @@ export function useFileUpload() {
     }
   }
 
+  function hasFilesInDrag(e: DragEvent): boolean {
+    return !!e.dataTransfer?.types && Array.from(e.dataTransfer.types).includes('Files')
+  }
+
   // 拖拽上传
   const dragCounter = ref(0)
   const isDragging = computed(() => dragCounter.value > 0)
@@ -90,7 +94,9 @@ export function useFileUpload() {
   function onDragEnter(e: DragEvent) {
     e.preventDefault()
     e.stopPropagation()
-    dragCounter.value++
+    if (hasFilesInDrag(e)) {
+      dragCounter.value++
+    }
   }
 
   function onDragOver(e: DragEvent) {
@@ -101,7 +107,9 @@ export function useFileUpload() {
   function onDragLeave(e: DragEvent) {
     e.preventDefault()
     e.stopPropagation()
-    dragCounter.value--
+    if (hasFilesInDrag(e)) {
+      dragCounter.value--
+    }
   }
 
   async function onDrop(e: DragEvent, id: string|null) {
