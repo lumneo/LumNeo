@@ -196,10 +196,10 @@ export function processMessageContent(text: string, isStreaming = false): string
                 formatted = String(formatted)
               }
 
-              cardsHtml += `<div class="tool-result"><span class="result-label">📊 结果：</span><pre class="result-content"><code>${escapeHtml(formatted)}</code></pre></div>`
+              cardsHtml += `<div class="tool-result"><span class="result-label">📑 结果：</span><pre class="result-content"><code>${escapeHtml(formatted)}</code></pre></div>`
           } catch (err) {
                 // 结果解析兜底
-                cardsHtml += `<div class="tool-result"><span class="result-label">📊 结果解析失败：</span><pre class="result-content"><code>${escapeHtml(jsonStr)}</code></pre></div>`
+                cardsHtml += `<div class="tool-result"><span class="result-label">📑 结果解析失败：</span><pre class="result-content"><code>${escapeHtml(jsonStr)}</code></pre></div>`
             }
             return ''
         })
@@ -226,8 +226,8 @@ export function processMessageContent(text: string, isStreaming = false): string
         try {
           const usage = JSON.parse(jsonStr);
           const html = `<div class="token-usage">
-            <span title="速度">🏃 ${usage.speed}</span>
-            <span title="总计">📈 ${usage.total_tokens} token</span>
+            <span title="速度">🚀 ${usage.speed}</span>
+            <span title="总计">📊 ${usage.total_tokens} token</span>
           </div>`
           const key = `<!--BLOCK_${blockMap.size}-->`
           blockMap.set(key, html)
