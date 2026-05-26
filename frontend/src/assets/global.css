@@ -9,7 +9,7 @@ p{margin:0;padding:4px;}
   --text-primary: #e4e7ed;
   --text-secondary: #8b92a0;
   --accent: #6366f1;
-  --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6);
+  --accent-gradient: linear-gradient(135deg, #6164fa, #7f4bfa);
   --glass-bg: rgba(19, 23, 32, 0.6);
   --glass-border: 1px solid rgba(99, 102, 241, 0.18);
   --shadow-glow: 0 0 12px rgba(99, 102, 241, 0.12);

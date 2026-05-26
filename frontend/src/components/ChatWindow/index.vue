@@ -307,7 +307,7 @@
                 </template>
               </n-button>
             </div>
-            <div style="width:100%;position:absolute;bottom:2px;color:#999;font-size:12px;text-align:center;">内容由 AI 生成，请仔细甄别</div>
+            <div style="width:100%;position:absolute;bottom:2px;color:#999;font-size:12px;text-align:center;">内容由 AI 生成，未必正确无误</div>
           </div>
         </main>
       </div>

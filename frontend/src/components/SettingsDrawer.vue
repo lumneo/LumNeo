@@ -346,6 +346,7 @@ async function saveWorkspace(path: string, isMsg: boolean = true) {
     if (res.ok) {
       if (isMsg)
         message.success('工作目录设置成功')
+        localStorage.setItem('workspacePath', path)
     } else {
       const errorData = await res.json()
       message.error(errorData.detail || '工作目录设置失败')

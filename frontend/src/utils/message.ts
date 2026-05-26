@@ -46,7 +46,7 @@ export function addFileTypeClassToLinks(container: string|HTMLElement, recursive
   // 获取容器内的所有 a 标签
   const links: any = recursive 
     ? root.querySelectorAll('a') 
-    : root.children // 仅直接子元素，按需调整
+    : root.children
 
   // 文件类型映射表
   const typeMap = [
@@ -80,7 +80,7 @@ export function addFileTypeClassToLinks(container: string|HTMLElement, recursive
       link.classList.add('file-unknown')
     }
     link.setAttribute('target', '_blank')
-    link.setAttribute('download', '')
+    link.setAttribute('download', link.textContent?.trim() || '')
   })
 }
 
@@ -292,6 +292,9 @@ export async function cleanMessages(msgs: Message[]): Promise<{ role: string; co
       return { role: msg.role, content: msg.content }
     }
 
+    // 获取本地 IP 地址
+    const urlhost = window.location.host.replace(/\b(?:localhost|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g, localIP.value)
+
     // --- 处理图片：构建多模态 content ---
     let contentForModel: string | any[]
     if (imageFiles.length > 0) {
@@ -299,7 +302,7 @@ export async function cleanMessages(msgs: Message[]): Promise<{ role: string; co
 
       // 1. 图片转 base64 并嵌入
       for (const img of imageFiles) {
-        const base64 = await urlToBase64(img.url) // 需确保 urlToBase64 已实现
+        const base64 = await urlToBase64(img.url)
         contentArray.push({
           type: 'image_url',
           image_url: { url: base64 }
@@ -313,10 +316,11 @@ export async function cleanMessages(msgs: Message[]): Promise<{ role: string; co
 
       // 3. 非图片文件提示（如果有）
       if (nonImageFiles.length > 0) {
-        const fileTips = nonImageFiles.map(f => f.url.replace('/files/', '/')).join('\n')
+        const fileTips = nonImageFiles.map(f => f.url.replace('/files/', '/data/')).join('\n')
+        const mcp_fileTips = nonImageFiles.map(f => f.url.replace('/files/', `http://${urlhost}/files/`)).join('\n')
         contentArray.push({
           type: 'text',
-          text: `\n请使用工具读取以下文件：\n${fileTips}`
+          text: `\n\n 如果调用【系统内置工具】使用文件路径：\n ${fileTips} \n\n 否则使用url：${mcp_fileTips}`
         })
       }
 
@@ -325,9 +329,9 @@ export async function cleanMessages(msgs: Message[]): Promise<{ role: string; co
       // --- 纯文本 + 文档提示 ---
       let text = typeof msg.content === 'string' ? msg.content : ''
       if (nonImageFiles.length > 0) {
-        const urlhost = window.location.host.replace(/\b(?:localhost|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g, localIP.value)
-        const fileTips = nonImageFiles.map(f => f.url.replace('/files/', `http://${urlhost}/files/`)).join('\n')
-        text += `\n\n请使用工具读取以下文件：\n${fileTips}`
+        const fileTips = nonImageFiles.map(f => f.url.replace('/files/', '/data/')).join('\n')
+        const mcp_fileTips = nonImageFiles.map(f => f.url.replace('/files/', `http://${urlhost}/files/`)).join('\n')
+        text += `\n\n 如果调用【系统内置工具】使用文件路径：\n ${fileTips} \n\n 否则使用url：${mcp_fileTips}`
       }
       contentForModel = text
     }

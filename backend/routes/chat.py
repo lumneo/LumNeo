@@ -11,6 +11,7 @@ from backend.services.llm_service import LLMService
 from backend.services.tools import get_local_tools, get_mcp_tools
 from backend.database import get_db
 from backend.utils.base import resource_path, get_current_time
+from config_loader import config
 import backend
 
 
@@ -21,6 +22,8 @@ BASE_SYSTEM_PROMPT = ""
 full_path = resource_path("system_prompt.md")
 with open(full_path, 'r', encoding="utf-8") as f:
     BASE_SYSTEM_PROMPT = f.read()
+
+BASE_SYSTEM_PROMPT = BASE_SYSTEM_PROMPT.replace("{{uploads_dir}}", str(config.uploads_dir))
 
 
 disabled_tools = ['system_write_file', 'system_patch_file', 'system_create_project_tree', 'system_read_file_list']
@@ -107,7 +110,8 @@ async def chat(
 
         messages = [m for m in messages if m["role"] != "system"]
 
-        system_prompt = BASE_SYSTEM_PROMPT.replace("{{workspace_path}}", backend.workspace_path).replace("{{time_now}}", get_current_time())
+        system_prompt = BASE_SYSTEM_PROMPT.replace("{{workspace_path}}", backend.workspace_path)
+        system_prompt = system_prompt.replace("{{time_now}}", get_current_time())
         # profile_prompt 加入到 system_prompt 中
         if profile_prompt:
             system_prompt = f"{system_prompt}\n\n ### 角色扮演 \n\n{profile_prompt}"
