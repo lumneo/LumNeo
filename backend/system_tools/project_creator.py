@@ -2,7 +2,7 @@
 """
 从目录结构文本创建项目目录
 """
-
+from backend.bootstrap import logger
 import os
 import re
 from pathlib import Path
@@ -234,7 +234,7 @@ class ProjectCreator:
     def _log(self, msg):
         self.log_messages.append(msg)
         if self.verbose:
-            print(msg)
+            logger.info(msg)
 
     def summary(self):
         """返回总结信息，不再直接打印"""
@@ -252,7 +252,7 @@ class ProjectCreator:
         summary_text = "\n".join(lines)
         self.log_messages.append(summary_text)
         if self.verbose:
-            print(summary_text)
+            logger.info(summary_text)
         return summary_text
 
 
@@ -299,7 +299,7 @@ def create_project_tree(tree: str, path: str) -> dict:
             "error": "未能解析出任何目录或文件，请检查输入格式",
         }
 
-    # 创建项目（关闭 verbose，避免 print 污染标准输出）
+    # 创建项目
     creator = ProjectCreator(
         instructions=instructions,
         base_path=safe_path,

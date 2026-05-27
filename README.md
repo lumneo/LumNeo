@@ -127,7 +127,7 @@ cd frontend && npm run dev
 conda activate lumneo
 python main.py
 
-# 提示：如果只需要测试 API 不需要 GUI 界面，可以使用 python main.py --no-gui
+# 提示：如果需要启动 GUI 界面，可以使用 python main.py --gui
 ```
 
 ### 4. 构建可执行文件
@@ -151,7 +151,7 @@ build.bat
       "args": ["-lc", "/path/to/start.sh"]
     },
     "remote-tool": {
-      "url": "http://127.0.0.1:8001/mcp"
+      "url": "http://127.0.0.1:8000/mcp"
     }
   }
 }

@@ -41,9 +41,6 @@ class AppConfig:
             self.resource_dir = Path.cwd()
             self.data_dir = Path.cwd()
         
-        # 解析 data_dir：可能是绝对路径，也可能是相对路径（相对于 executable_dir）
-        
-        
         # 子目录（相对于 data_dir）
         self.uploads_dir = self.data_dir / self.raw_config.get("uploads_dir", "data/uploads")
         self.logs_dir = self.data_dir / self.raw_config.get("logs_dir", "logs")
@@ -81,7 +78,6 @@ class AppConfig:
             except PermissionError:
                 # 如果 ProgramData 无权限，尝试 fallback 到用户目录
                 fallback_base = Path(os.environ.get('APPDATA', Path.home() / 'AppData/Roaming')) / '.LumNeo'
-                print(f"权限不足，回退到用户目录: {fallback_base}")
                 # 重新设定所有路径
                 self.data_dir = fallback_base
                 self.uploads_dir = fallback_base / "uploads"
@@ -96,29 +92,21 @@ class AppConfig:
     @property
     def frontend_index(self) -> str:
         """返回前端入口文件的本地文件路径"""
-        # 关键点1：确定文件位置
-        # 1. 打包后：使用 sys._MEIPASS
-        # 2. 开发时：使用 static_dir 配置
         if getattr(sys, 'frozen', False):
             # 打包后的环境，资源文件在 sys._MEIPASS 中
             base_path = Path(sys._MEIPASS)
         else:
-            # 开发环境，根据你的 static_dir 配置决定
-            base_path = self.base_dir  # 或者 self.static_dir
+            base_path = self.base_dir
 
-        # 关键点2：构建完整路径，并根据实际情况适配
-        # 这里假设你的 index.html 在 base_path 下的 'frontend/dist' 目录中
         index_path = base_path / "frontend/dist/index.html"
 
         if not index_path.exists():
-            # 一个备用方案：尝试在 static_dir 目录下寻找
             fallback_path = self.static_dir / "index.html"
             if fallback_path.exists():
                 index_path = fallback_path
             else:
                 raise FileNotFoundError(f"前端入口文件不存在: {index_path}")
 
-        # 关键点3：直接返回字符串路径，而非 file:// URL
         return str(index_path.resolve())
 
     def resource_path(self, relative_path: str) -> str:
@@ -131,5 +119,4 @@ class AppConfig:
             base_path = Path(__file__).parent
         return str(base_path / relative_path)
 
-# 全局实例
 config = AppConfig()
