@@ -6,6 +6,8 @@ import { markedHighlight } from 'marked-highlight'
 import { type Message } from '@/stores/chat'
 import type { UploadedFile } from '@/composables/useFileUpload'
 import hljs from 'highlight.js'
+import markedKatex from 'marked-katex-extension'
+import 'katex/dist/katex.min.css'
 import 'highlight.js/styles/atom-one-dark.css'
 
 
@@ -21,6 +23,14 @@ mermaid.initialize({
   }
 })
 
+marked.use({
+  tokenizer: {
+    code() {
+      return undefined // 拒绝识别空格缩进的代码块，直接跳过
+    }
+  }
+})
+
 marked.use(markedHighlight({
   langPrefix: 'hljs language-',
   highlight(code, lang) {
@@ -28,6 +38,13 @@ marked.use(markedHighlight({
     const language = hljs.getLanguage(lang) ? lang : 'plaintext'
     return hljs.highlight(code, { language }).value
   }
+}))
+
+marked.use(markedKatex({
+  throwOnError: false,       // 报错时显示原始公式而不是中断
+  output: 'html',           // 使用 KaTeX 生成 HTML 而不是 MathML
+  nonStandard: true,       // 允许使用非标准 KaTeX 命令
+  strict: 'ignore'
 }))
 
 /**
@@ -104,7 +121,6 @@ export function processMessageContent(text: string, isStreaming = false): string
   // 使用 Map 存储占位符到 HTML 的映射
   const blockMap = new Map<string, string>()
   let processedText = text
-  
 
   // 1. 处理完整的思考块
   processedText = processedText.replace(
@@ -112,7 +128,7 @@ export function processMessageContent(text: string, isStreaming = false): string
     (_, content, time) => {
       const key = `<!--BLOCK_0${blockMap.size}-->` // 使用 HTML 注释占位符
       const timeStr = time ? ` (${time}秒)` : ''
-      const html = `<div class="reasoning-block"><div class="reasoning-summary no-select">💭 已思考 ${timeStr}</div><div class="reasoning-content"><div class="reasoning-inner">${marked.parse(content)}</div></div></div>`
+      const html = `<div class="reasoning-block" data-reasoning="open"><div class="reasoning-summary no-select">💭 已思考 ${timeStr}</div><div class="reasoning-content"><div class="reasoning-inner">${marked.parse(content)}</div></div></div>`
       blockMap.set(key, html)
       return key
     }
@@ -241,8 +257,11 @@ export function processMessageContent(text: string, isStreaming = false): string
     processedText = processedText.replace(/<!--token_usage:.*?-->/g, '')
   }
 
+  processedText = processedText.replace(/(\*\*.*?\*\*)/g, ' $1 ')
+  processedText = processedText.replace(/^(\s*[*\-+]) {4}/gm, '$1   ')
+
   // 5. 用 marked 渲染剩余纯文本
-  let finalHtml: any = marked.parse(processedText)
+  let finalHtml: any = marked.parse(processedText.trim())
 
   // 6. 将占位符替换为实际 HTML
   blockMap.forEach((html, key) => {

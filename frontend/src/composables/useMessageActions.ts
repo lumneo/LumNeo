@@ -70,13 +70,39 @@ export function useMessageActions() {
   async function saveEdit(regenerateCallback?: () => Promise<void>) {
     if (!editingMsg.value) return
     const msg = editingMsg.value
-    const newContent = editContent.value
+    const newText = editContent.value.trim()
 
-    if (newContent === msg.content) {
+    if (newText === msg.content) {
       showEditModal.value = false
       return
     }
-    await chatStore.editMessage(msg.id!, newContent)
+
+    let finalContent = newText
+    if (msg.role === 'assistant') {
+      // 从原始内容中提取各种特殊标记块（注意要在修改 msg.content 前提取）
+      const reasoningBlocks = msg.content.match(
+        /<!--reasoning:start-->[\s\S]*?<!--reasoning:end(:\d+\.\d+)?-->/g
+      ) || []
+      const toolBlocks = msg.content.match(
+        /<!--tool_calls:start-->[\s\S]*?<!--tool_calls:end-->/g
+      ) || []
+      const tokenUsage = msg.content.match(
+        /<!--token_usage:.*?-->/g
+      ) || []
+      const thinkingTime = msg.content.match(
+        /<!--thinking_time:.*?-->/g
+      ) || []
+
+      // 通常思考块和工具块放在前面，token/时间放在结尾
+      const leading = [...reasoningBlocks, ...toolBlocks].join('\n')
+      const trailing = [...tokenUsage, ...thinkingTime].join('\n')
+
+      finalContent = [leading, newText, trailing].filter(Boolean).join('\n')
+    }
+
+    msg.content = finalContent
+    msg.renderedHtml = null
+    await chatStore.editMessage(msg.id!, finalContent)
     showEditModal.value = false
 
     // 如果编辑的是用户消息，删除后续回复并重新生成

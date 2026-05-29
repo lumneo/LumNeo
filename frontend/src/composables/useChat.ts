@@ -231,7 +231,7 @@ export function useChat() {
   /**
    * 针对某条助手消息重新生成（使用该消息前的历史）
    */
-  async function regenerateResponse(assistantMsg: Message) {
+  async function regenerateResponse(assistantMsg: Message, scrollToBottom: () => void) {
     if (!chatStore.activeChatId) return
     const currentModel = configStore.activeModel
     if (!currentModel) {
@@ -269,6 +269,7 @@ export function useChat() {
 				},
 				profile_id: chatStore.enableProfile ? profileStore.activeProfileId : null,
 			})
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -276,7 +277,7 @@ export function useChat() {
         signal: controller.signal,
       })
 
-      const fullText = await readStream(response)
+      const fullText = await readStream(response, scrollToBottom)
 
       // 直接更新原消息对象
       assistantMsg.content = fullText

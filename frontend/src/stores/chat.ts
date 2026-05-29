@@ -2,11 +2,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
 export interface Message {
-  id?: number | string
+  id?: number
   role: 'user' | 'assistant' | 'system'
   content: any
   file_ref?: any
-  renderedHtml?: string // 用于缓存渲染后的 HTML
+  renderedHtml?: string | null // 用于缓存渲染后的 HTML
 }
 
 export interface Chat {
@@ -161,11 +161,10 @@ export const useChatStore = defineStore('chat', () => {
     const msg = chat.messages.find(m => m.id === messageId)
     if (msg) {
       msg.content = newContent
-      const filteredText = newContent.replace(/<!--token_usage:.*?-->/g, '')
       await fetch(`/api/chats/${activeChatId.value}/messages/${messageId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: msg.role, content: filteredText })
+        body: JSON.stringify({ role: msg.role, content: newContent })
       }).catch(e => console.warn('更新消息失败', e))
     }
   }

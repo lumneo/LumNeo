@@ -170,7 +170,6 @@
                     :item="msg"
                     :active="active"
                     :data-index="idx"
-                   
                   >
                     <div :class="['message-row', msg.role]" @click="">
                       <div class="bubble" :class="{ 'has-file': msg.file_ref }">
@@ -204,7 +203,7 @@
                           <n-button text class="icon-btn" size="small" @click="copyContent(msg)" title="复制">
                             <template #icon><n-icon><m-svg :name="copySvgName" /></n-icon></template>
                           </n-button>
-                          <n-button v-if="msg.role === 'assistant' && idx == currentMessages.length - 1" text class="icon-btn" size="small" @click="regenerateResponse(msg)" title="重新生成">
+                          <n-button v-if="msg.role === 'assistant' && idx == currentMessages.length - 1" text class="icon-btn" size="small" @click="handleRegenerateResponse(msg)" title="重新生成">
                             <template #icon><n-icon ><m-svg name="refresh"/></n-icon></template>
                           </n-button>
                           <n-button text class="icon-btn" size="small" @click="startEditMessage(msg)" title="编辑">
@@ -376,7 +375,7 @@ import { SettingsOutline, DocumentOutline, MenuOutline, QrCodeOutline, BarcodeOu
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 
-import { useChatStore } from '@/stores/chat'
+import { useChatStore, type Message } from '@/stores/chat'
 import { useConfigStore, fileConfig } from '@/stores/config'
 import { useProfileStore } from '@/stores/profiles'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
@@ -407,7 +406,7 @@ const showQRCode = ref(true)
 const streamDisplayHtml = ref('')
 let renderRafId: number | null = null
 const isAutoScrollEnabled = ref(true)            // 自动滚动开关
-const SCROLL_THRESHOLD = 200                     // 距离底部的容差阈值（像素）
+const SCROLL_THRESHOLD = 80                     // 距离底部的容差阈值（像素）
 const scrollerRef = ref<any>(null)
 
 function checkMobile() {
@@ -441,17 +440,20 @@ onStreamEnd.value = (fullText: string) => {
   // 获取当前对话的最新一条助手消息（也就是刚刚生成的这条）
   const messages = chatStore.getActiveMessages()
 
+  
+
   // 如果是重新生成，更新正在重新生成的那条消息
   if (regeneratingMsg.value) {
     const msg = regeneratingMsg.value
     msg.content = fullText
     msg.renderedHtml = renderMessageHtml(fullText, true)  // 缓存渲染结果
     regeneratingMsg.value = null   // 清空标记，恢复成普通消息显示
-     nextTick(() => {
+    nextTick(() => {
       setStreaming(false)
-        addCopyButtons()
-        renderMermaidDiagrams()
-      })
+      addCopyButtons()
+      renderMermaidDiagrams()
+      scrollerRef.value?.forceUpdate() // 强制更新，确保滚动条位置正确
+    })
     return
   }
 
@@ -506,7 +508,6 @@ const isProgrammaticScroll = ref(false)
 function scrollToBottom() {
   if (scrollerRef.value) {
     isProgrammaticScroll.value = true
-    // 稍微加个延时，确保 DOM 已经更新完毕
     setTimeout(() => {
       scrollerRef.value.scrollToBottom()
     }, 50)
@@ -518,22 +519,26 @@ function scrollToBottom() {
   }
 }
 
+function updateScrollState() {
+  if (scrollerRef.value?.$el) {
+    const target = scrollerRef.value.$el
+    const scrollTop = target.scrollTop
+    const scrollHeight = target.scrollHeight
+    const clientHeight = target.clientHeight
+
+    // 判断当前是否真的还在底部
+    const isAtBottom = (scrollHeight - scrollTop - clientHeight) <= SCROLL_THRESHOLD
+    isAutoScrollEnabled.value = isAtBottom
+  }
+}
+
 function handleScroll(event: Event) {
   if (isProgrammaticScroll.value) return
 
   const target = event.target as HTMLElement
   if (!target) return
 
-  const scrollTop = target.scrollTop
-  const scrollHeight = target.scrollHeight
-  const clientHeight = target.clientHeight
-
-  // 判断是否接近底部
-  // 当 "总高度 - 滚动出去的高度 - 可视高度" 小于 阈值 时，认为在底部
-  const isAtBottom = (scrollHeight - scrollTop - clientHeight) <= SCROLL_THRESHOLD
-  
-  // 更新状态
-  isAutoScrollEnabled.value = isAtBottom
+  updateScrollState()
 }
 
 async function createChat() {
@@ -556,6 +561,7 @@ function openChat(chatId: string) {
 
 // ---------- 发送消息包装 ----------
 function onSendMessage() {
+  isAutoScrollEnabled.value = true
   sendMessage(uploadedFiles.value, () => {
     if (isAutoScrollEnabled.value) {
       scrollToBottom()
@@ -566,7 +572,17 @@ function onSendMessage() {
 
 // ---------- 编辑后重新生成包装 ----------
 async function onRegenerateFromCurrentHistory() {
+  isAutoScrollEnabled.value = true
   await regenerateFromCurrentHistory(() => {
+    if (isAutoScrollEnabled.value) {
+      scrollToBottom()
+    }
+  })
+}
+
+async function handleRegenerateResponse(msg: Message) {
+  isAutoScrollEnabled.value = true
+  await regenerateResponse(msg, () => {
     if (isAutoScrollEnabled.value) {
       scrollToBottom()
     }
@@ -667,7 +683,12 @@ function handleReasoningClick(e: MouseEvent) {
             part = part.replace(/^>/, ' data-reasoning="open">')
           }
           parts[blockIndex + 1] = part
-          msg.renderedHtml = parts.join('<div class="reasoning-block"')
+          msg.renderedHtml = parts.join('<div class="reasoning-block"') // 防止虚拟滚动后展开状态丢失
+
+          setTimeout(() => {
+            scrollerRef.value?.forceUpdate()
+            updateScrollState()
+          }, 60)
         }
       }
     }
@@ -714,6 +735,10 @@ function handleToolClick(e: MouseEvent) {
           }
           parts[blockIndex + 1] = part
           msg.renderedHtml = parts.join('<div class="tool-calls-block"')
+          setTimeout(() => {
+            scrollerRef.value?.forceUpdate() 
+            updateScrollState()
+          }, 60)
         }
       }
     }
