@@ -6,6 +6,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: any
   file_ref?: any
+  renderedHtml?: string | null // 用于缓存渲染后的 HTML
 }
 
 export interface Chat {
@@ -79,12 +80,14 @@ export const useChatStore = defineStore('chat', () => {
     if (!chat) return
     const res = await fetch(`/api/chats/${chatId}/messages`)
     const msgs = await res.json()
+    
     chat.messages = msgs    
   }
 
   // 当前对话的消息（过滤 system）
   const currentChatMessages = computed(() => {
     const chat = chats.value.find(c => c.id === activeChatId.value)
+    
     return chat ? chat.messages.filter(m => m.role !== 'system') : []
   })
 
@@ -98,6 +101,9 @@ export const useChatStore = defineStore('chat', () => {
   async function addMessageToLocal(msg: Message) {
     const chat = chats.value.find(c => c.id === activeChatId.value)
     if (!chat) return
+    if (msg.id == null) {
+      msg.id = Date.now()
+    }
     chat.messages.push(msg)
     // 自动更新标题
     if (msg.role === 'user' && chat.messages.filter(m => m.role === 'user').length === 1) {
@@ -155,11 +161,10 @@ export const useChatStore = defineStore('chat', () => {
     const msg = chat.messages.find(m => m.id === messageId)
     if (msg) {
       msg.content = newContent
-      const filteredText = newContent.replace(/<!--token_usage:.*?-->/g, '')
       await fetch(`/api/chats/${activeChatId.value}/messages/${messageId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: msg.role, content: filteredText })
+        body: JSON.stringify({ role: msg.role, content: newContent })
       }).catch(e => console.warn('更新消息失败', e))
     }
   }

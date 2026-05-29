@@ -197,17 +197,44 @@
 /* ========== 消息容器 ========== */
 .message-container {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 20px 0;
   width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
-.message-main {
-  width:80%;
+.virtual-scroller {
+  height: 100%;
+  overflow-y: auto; /* 滚动条出现在这里 */
+  scroll-behavior: auto;
+}
+.virtual-scroller :deep(.vue-recycle-scroller__item-wrapper) {
+  width: 80%;
   max-width:1000px;
+  flex: 1;
   margin:0 auto;
+}
+.streaming-after-item {
+  width: 80%;
+  max-width:1000px;
+  flex: 1;
+  margin:0 auto;
+}
+
+/* 简单的淡入淡出动画 */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
+}
+.message-main {
+  width:100%;
+  overflow: hidden;
+  position: relative;
 }
 .message-row {
   display: flex;
@@ -243,6 +270,14 @@
   margin-top: 40px;
   margin-bottom: 40px;
 }
+.user-content {
+  max-height: 200px;
+  padding: 6px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.user-content::-webkit-scrollbar-thumb { background: rgba(0,0,0,.2); border-radius: 3px; }
+.user-content::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.4); }
 
 .streaming {
   border-left: 3px solid var(--accent);
@@ -291,6 +326,31 @@
   backdrop-filter: blur(10px);
   gap: 12px;
   position: relative;
+}
+
+.rotate-circle {
+    opacity: 1;
+    background-image: url(data:image/png;base64,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);
+    background-size: cover;
+    width: 100%;
+    height: 100%;
+    transition: opacity .3s;
+    animation: 2s linear infinite rotate-Co1NtI;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+@keyframes rotate-Co1NtI{0%{transform:rotate(0)}to{transform:rotate(360deg)}}
+.scroll-to-bottom-btn {
+  position: absolute;
+  top: -60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  /* 根据你的主题调整背景色 */
+  background-color: var(--glass-bg); 
+  z-index: 1;
 }
 
 .compose-thinking {
