@@ -290,6 +290,8 @@
                 @keydown.enter.exact="onSendMessage"
                 :disabled="isLoading || !chatStore.activeChatId || !activeModelId"
                 class="compose-input"
+                :class="{ 'jelly-effect': isJellyActive }"
+                @click="triggerJelly"
               />
             </div>
 
@@ -335,7 +337,7 @@
                 </template>
               </n-button>
               <n-button
-              v-else
+                v-else
                 class="send-btn"
                 @click="stopGeneration"
                 strong
@@ -761,6 +763,19 @@ watch(
   }
 )
 
+// 果冻动画控制
+const isJellyActive = ref(false)
+let jellyTimer: ReturnType<typeof setTimeout> | null = null
+
+function triggerJelly() {
+  if (isJellyActive.value) return   // 避免动画叠加
+  isJellyActive.value = true
+  if (jellyTimer) clearTimeout(jellyTimer)
+  jellyTimer = setTimeout(() => {
+    isJellyActive.value = false
+  }, 600)   // 与动画时长匹配
+}
+
 const isRender = ref(false)
 
 // ---------- 生命周期 ----------
@@ -788,6 +803,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  if (jellyTimer) clearTimeout(jellyTimer)
   window.removeEventListener('resize', checkMobile)
   if (messageListRef.value) {
     messageListRef.value.removeEventListener('scroll', handleScroll)

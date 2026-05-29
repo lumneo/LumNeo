@@ -5,6 +5,7 @@ p{margin:0;padding:4px;}
   --bg-secondary: #131720;
   --bg-panel: rgba(19, 23, 32, 0.85);
   --border-color: #333946;
+  --border-color-hover: #5f6779;
   --border-glow: #895bf7;
   --thinking-text: #9162db;
   --text-primary: #f9fafb;
@@ -21,6 +22,7 @@ p{margin:0;padding:4px;}
   --bg-secondary: #fcfcfc;
   --bg-panel: rgba(255, 255, 255, 0.85);
   --border-color: #e2e5e9;
+  --border-color-hover: #d1d5db;
   --border-glow: #895bf7;
   --thinking-text: #a681e0;
   --text-primary: #1a1f36;
@@ -39,7 +41,7 @@ p{margin:0;padding:4px;}
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-color-hover); }
 
 .message-content img {
   width: 100%;
@@ -292,7 +294,8 @@ thead {
 }
 
 th {
-  padding: 14px 18px;
+  padding: 14px;
+  min-width: 80px;
   text-align: left;
   font-weight: 600;
   letter-spacing: 0.5px;
@@ -300,7 +303,7 @@ th {
 }
 
 td {
-  padding: 12px 18px;
+  padding: 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
 }
@@ -550,6 +553,17 @@ tr:last-child td:last-child {
   max-height: 200000px; /* 足够大即可 */
 }
 
+.jelly-effect {
+  animation: jellyPop 0.6s ease;
+}
+
+@keyframes jellyPop {
+  0%   { transform: scale(1); }
+  25%  { transform: scale(0.95); }
+  50%  { transform: scale(1.03); }
+  75%  { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
 
 /* ========== 移动端适配（屏幕宽度 ≤ 768px） ========== */
 @media screen and (max-width: 768px) {
