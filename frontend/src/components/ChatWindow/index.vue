@@ -153,7 +153,8 @@
             </div>
             <div class="message-main" v-else>
               <div v-if="showWelcome && currentMessages.length === 0">
-                <!-- <svgWelcome /> -->
+                <svgWelcomeDark v-if="configStore.themeMode === 'dark'" />
+                <svgWelcomeLight v-else />
               </div>
               <DynamicScroller
                 :items="currentMessages"
@@ -285,13 +286,14 @@
                 v-model:value="currentInput"
                 type="textarea"
                 name="talk"
-                placeholder="今天要做点什么？"
+                placeholder="今天要做点什么呢？"
                 :autosize="{ minRows: 4, maxRows: 6 }"
                 @keydown.enter.exact="onSendMessage"
                 :disabled="isLoading || !chatStore.activeChatId || !activeModelId"
                 class="compose-input"
                 :class="{ 'jelly-effect': isJellyActive }"
-                @click="triggerJelly"
+                @focus="triggerJelly"
+                @paste="onPaste"
               />
             </div>
 
@@ -381,7 +383,8 @@ import { useChatStore, type Message } from '@/stores/chat'
 import { useConfigStore, fileConfig } from '@/stores/config'
 import { useProfileStore } from '@/stores/profiles'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
-import svgWelcome from '@/components-svg/svgWelcome.vue'
+import svgWelcomeDark from '@/components-svg/svgWelcomeDark.vue'
+import svgWelcomeLight from '@/components-svg/svgWelcomeLight.vue'
 import svgLoading from '@/components-svg/svgLoading.vue'
 import Introduction from '@/components/Introduction.vue'
 import mSvg from '@/components/MSvg.vue'
@@ -442,8 +445,6 @@ onStreamEnd.value = (fullText: string) => {
   // 获取当前对话的最新一条助手消息（也就是刚刚生成的这条）
   const messages = chatStore.getActiveMessages()
 
-  
-
   // 如果是重新生成，更新正在重新生成的那条消息
   if (regeneratingMsg.value) {
     const msg = regeneratingMsg.value
@@ -468,6 +469,7 @@ onStreamEnd.value = (fullText: string) => {
     nextTick(() => {
       addCopyButtons()
       renderMermaidDiagrams()
+      scrollerRef.value?.forceUpdate()
     })
   }
 }
@@ -550,6 +552,124 @@ async function createChat() {
 
 function setQRCodeUrl () {
   qrCodeUrl.value = window.location.href.replace(/\b(?:localhost|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g, local_ip.value)
+}
+
+// ========== 粘贴上传相关 ==========
+const pasteToastVisible = ref(false)
+const lastPasteCount = ref(0)
+let pasteToastTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * 检查文件类型是否在 fileConfig.accept 允许范围内
+ * @param fileType MIME 类型，如 "image/png"
+ * @param fileName 文件名（用于扩展名匹配）
+ */
+function isFileTypeAccepted(fileType: string, fileName: string): boolean {
+  const accept = fileConfig.accept
+  // 空 accept 或通配符表示接受所有
+  if (!accept || accept === '*' || accept === '*/*') return true
+  
+  const acceptItems = accept.split(',').map(s => s.trim()).filter(Boolean)
+  if (acceptItems.length === 0) return true
+  
+  for (const item of acceptItems) {
+    // 匹配 MIME 类型通配符，如 image/*
+    if (item.endsWith('/*')) {
+      const prefix = item.slice(0, -1) // "image/"
+      if (fileType.startsWith(prefix)) return true
+      continue
+    }
+    // 匹配扩展名，如 .pdf .doc
+    if (item.startsWith('.')) {
+      const ext = item.toLowerCase()
+      if (fileName.toLowerCase().endsWith(ext)) return true
+      // 也尝试从 MIME 类型推断扩展名
+      const mimeExt = fileType.split('/')[1]
+      if (mimeExt && ext === '.' + mimeExt.toLowerCase()) return true
+      continue
+    }
+    // 精确 MIME 类型匹配
+    if (fileType === item) return true
+  }
+  return false
+}
+
+/**
+ * 粘贴事件处理 - 支持 Ctrl+V 粘贴剪贴板中的文件/图片
+ */
+function onPaste(e: ClipboardEvent) {
+  // 检查上传条件
+  if (!chatStore.activeChatId) return
+  if (isLoading.value) return
+  if (!activeModelId.value) return
+  
+  const clipboardData = e.clipboardData
+  if (!clipboardData) return
+  
+  const items = clipboardData.items
+  if (!items || items.length === 0) return
+  
+  // 收集剪贴板中的文件
+  const pastedFiles: File[] = []
+  let hasOnlyText = true
+  
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (item.kind === 'file') {
+      hasOnlyText = false
+      const file = item.getAsFile()
+      if (file && file.size > 0) {
+        pastedFiles.push(file)
+      }
+    }
+  }
+  
+  // 如果没有文件，只有纯文本，不拦截（让输入框正常处理文本粘贴）
+  if (pastedFiles.length === 0) return
+  
+  // 过滤不符合 accept 条件的文件
+  const acceptedFiles = pastedFiles.filter(f => isFileTypeAccepted(f.type, f.name))
+  if (acceptedFiles.length === 0) return
+  
+  // 阻止默认行为（防止图片以 base64 等形式插入到输入框）
+  e.preventDefault()
+  
+  // 计算还能添加多少个文件
+  const remaining = fileConfig.max - uploadedFiles.value.length
+  if (remaining <= 0) {
+    // 已达上限，静默忽略
+    return
+  }
+  
+  // 截断到剩余可添加数量
+  const filesToAdd = acceptedFiles.slice(0, remaining)
+  
+  // 为每个粘贴的文件创建上传对象并添加到 uploadedFiles
+  for (const file of filesToAdd) {
+    // 为没有合适文件名的粘贴文件生成名称（如截图粘贴）
+    let filename = file.name
+    if (!filename || filename === 'image.png' || filename === 'blob' || filename === 'clipboard') {
+      const ext = file.type ? file.type.split('/')[1] || 'png' : 'png'
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      filename = `paste-${timestamp}-${Math.random().toString(36).slice(2, 6)}.${ext}`
+    }
+    
+    const url = URL.createObjectURL(file)
+    
+    uploadedFiles.value.push({
+      filename,
+      type: file.type || 'application/octet-stream',
+      url
+    })
+  }
+  
+  // 显示粘贴成功提示
+  lastPasteCount.value = filesToAdd.length
+  pasteToastVisible.value = true
+  if (pasteToastTimer) clearTimeout(pasteToastTimer)
+  pasteToastTimer = setTimeout(() => {
+    pasteToastVisible.value = false
+  }, 1800)
 }
 
 // ---------- 导航 ----------

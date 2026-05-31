@@ -23,7 +23,31 @@ mermaid.initialize({
   }
 })
 
+
 marked.use({
+  extensions: [
+      {
+          name: 'no-single-tilde-strikethrough',
+          level: 'inline',           // 规则作用范围为行内元素
+          start(src) {
+              // 查找单个波浪号的位置
+              return src.match(/~[^~]/)?.index;
+          },
+          tokenizer(src, _tokens) {
+              // 匹配被单个波浪号包裹的内容（非贪婪模式）
+              const match = src.match(/^~([^~]+)~/);
+              if (match) {
+                  // 若匹配成功，则返回一个普通的文本节点，保持原样
+                  return {
+                      type: 'text',
+                      raw: match[0],
+                      text: match[0],
+                  };
+              }
+              return undefined; // 未匹配则返回 undefined，交由其他解析器处理
+          },
+      },
+  ],
   tokenizer: {
     code() {
       return undefined // 拒绝识别空格缩进的代码块，直接跳过
@@ -225,7 +249,7 @@ export function processMessageContent(text: string, isStreaming = false): string
         const title = toolCount > 0 ? `🔧 工具调用 (${toolCount}个)` : '🔧 工具调用'
 
         // 包装在 details 中
-        const html = `<div class="tool-calls-block"><div class="tool-summary no-select">${title}</div><div class="tool-calls-container"><div class="tool-inner">${cardsHtml}</div></div></div>`
+        const html = `<div class="tool-calls-block" data-tool="open"><div class="tool-summary no-select">${title}</div><div class="tool-calls-container"><div class="tool-inner">${cardsHtml}</div></div></div>`
 
         const key = `<!--BLOCK_${blockMap.size}-->`
         blockMap.set(key, html)

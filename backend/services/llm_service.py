@@ -12,7 +12,12 @@ from backend.services.tools import get_all_tools, execute_tool
 class LLMService:
     instance: Optional["LLMService"] = None
 
-    def __init__(self, model_type: str, model_name: str, api_key: str = "", base_url: str = None, thinking: str = 'enabled'):
+    def __init__(self, 
+                 model_type: str, 
+                 model_name: str, 
+                 api_key: str = "", 
+                 base_url: str = None, 
+                 thinking: str = 'enabled'):
         self.model_type = model_type
         self.model_name = model_name
         self.thinking = thinking
@@ -24,9 +29,10 @@ class LLMService:
         enable_tools: bool = False,
         tools: Optional[List[Dict]] = None,
         request: Optional[Request] = None,
-        mcp_manager = None
+        mcp_manager = None,
+        params: Dict = None,
     ) -> AsyncGenerator[str, None]:
-        
+        params = params or {}
         current_messages = messages.copy()
 
         if tools is None and enable_tools:
@@ -53,9 +59,21 @@ class LLMService:
                 "model": self.model_name,
                 "messages": current_messages,
                 "stream": True,
+                "temperature": params.get('temperature', 1.0),
+                "top_p": params.get('top_p', 0.95),
+                "frequency_penalty": params.get('frequency_penalty', 0.0),
+                "presence_penalty": params.get('presence_penalty', 0.0),
                 "stream_options": {"include_usage": True},
-                "extra_body": {"thinking": {"type": self.thinking}}
+                "extra_body": {
+                    "top_k": params.get('top_k', 20),
+                    "chat_template_kwargs": {"enable_thinking": self.thinking == "enabled", "preserve_thinking": True},
+                    "thinking": {"type": self.thinking},
+                    "enable_thinking": self.thinking == "enabled",
+                    "preserve_thinking": True
+                }
             }
+
+            print(kwargs)
             
             if step == MAX_STEPS - 1:
                 yield "\n⚠️ 工具调用次数已达上限，正在基于已收集信息生成最终总结...\n"

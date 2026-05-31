@@ -86,12 +86,13 @@ async def chat(
         local_tools = get_local_tools()
         tools = [t for t in local_tools if t["function"]["name"] in default_tools]
         profile_prompt = ""
+        params = {}
 
         # 如果携带了 profile_id，获取角色信息
         if request.enable_tools and request.profile_id is not None:
             db = await get_db()
             cursor = await db.execute(
-                "SELECT tools, profile_prompt FROM profiles WHERE id = ?",
+                "SELECT tools, profile_prompt, temperature, top_p, top_k, frequency_penalty, presence_penalty FROM profiles WHERE id = ?",
                 (request.profile_id,)
             )
             row = await cursor.fetchone()
@@ -100,6 +101,13 @@ async def chat(
             if row:
                 allowed_tools = json.loads(row[0] or "[]")
                 profile_prompt = row[1] or ""
+                params = {
+                    "temperature": row[2] if row[2] is not None else 1.0,
+                    "top_p": row[3] if row[3] is not None else 1.0,
+                    "top_k": row[4] if row[4] is not None else 40,
+                    "frequency_penalty": row[5] if row[5] is not None else 0.0,
+                    "presence_penalty": row[6] if row[6] is not None else 0.0,
+                }
 
                 # 筛选工具
                 mcp_tools = await get_mcp_tools(mcp_manager) if request.enable_tools else []
@@ -148,6 +156,7 @@ async def chat(
                 tools=tools,
                 request=fastapi_request,
                 mcp_manager=mcp_manager,
+                params=params
             ),
             media_type="text/event-stream"
         )

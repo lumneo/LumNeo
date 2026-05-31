@@ -157,7 +157,7 @@
       </n-form-item>
       <n-form-item label="赋予能力">
         <n-button size="small" style="position:absolute;left:-64px;top:40px;" @click="loadTools">刷新</n-button>
-        <div style="width: 420px; max-height: 40vh; overflow-y: auto;">
+        <div style="width: 420px; max-height: 200px; overflow-y: auto;">
           <n-checkbox-group v-model:value="profileForm.tools">
             <n-space vertical>
               <n-checkbox v-for="tool in allTools" :key="tool.function.name" :value="tool.function.name">
@@ -176,6 +176,113 @@
         <p v-if="allTools.length === 0" style="color: gray;">暂无可用工具，请检查 MCP 服务或工具配置。</p>
       </n-form-item>
     </n-form>
+    <n-collapse :default-expanded-names="[]">
+      <n-collapse-item title="高级设置" name="params">
+        <!-- Temperature -->
+        <n-form-item label="温度" label-placement="left" label-width="100">
+          <n-space align="center">
+            <n-slider
+              v-model:value="profileForm.temperature"
+              :min="0"
+              :max="2"
+              :step="0.1"
+              style="width: 120px"
+            />
+            <n-input-number
+              v-model:value="profileForm.temperature"
+              size="small"
+              :min="0"
+              :max="2"
+              :step="0.1"
+              style="width: 80px"
+            />
+          </n-space>
+        </n-form-item>
+
+        <!-- Top P -->
+        <n-form-item label="Top P采样" label-placement="left" label-width="100">
+          <n-space align="center">
+            <n-slider
+              v-model:value="profileForm.top_p"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              style="width: 120px"
+            />
+            <n-input-number
+              v-model:value="profileForm.top_p"
+              size="small"
+              :min="0"
+              :max="1"
+              :step="0.05"
+              style="width: 80px"
+            />
+          </n-space>
+        </n-form-item>
+
+        <!-- Top K -->
+        <n-form-item label="Top K采样" label-placement="left" label-width="100">
+          <n-space align="center">
+            <n-slider
+              v-model:value="profileForm.top_k"
+              :min="1"
+              :max="100"
+              :step="1"
+              style="width: 120px"
+            />
+            <n-input-number
+              v-model:value="profileForm.top_k"
+              size="small"
+              :min="1"
+              :max="100"
+              :step="1"
+              style="width: 80px"
+            />
+          </n-space>
+        </n-form-item>
+        <!-- Frequency Penalty -->
+        <n-form-item label="频率惩罚" label-placement="left" label-width="100">
+          <n-space align="center">
+            <n-slider
+              v-model:value="profileForm.frequency_penalty"
+              :min="-2"
+              :max="2"
+              :step="0.1"
+              style="width: 120px"
+            />
+            <n-input-number
+              v-model:value="profileForm.frequency_penalty"
+              size="small"
+              :min="-2"
+              :max="2"
+              :step="0.1"
+              style="width: 80px"
+            />
+          </n-space>
+        </n-form-item>
+
+        <!-- Presence Penalty -->
+        <n-form-item label="存在惩罚" label-placement="left" label-width="100">
+          <n-space align="center">
+            <n-slider
+              v-model:value="profileForm.presence_penalty"
+              :min="-2"
+              :max="2"
+              :step="0.1"
+              style="width: 120px"
+            />
+            <n-input-number
+              v-model:value="profileForm.presence_penalty"
+              size="small"
+              :min="-2"
+              :max="2"
+              :step="0.1"
+              style="width: 80px"
+            />
+          </n-space>
+        </n-form-item>
+      </n-collapse-item>
+    </n-collapse>
   </n-modal>
 </template>
 
@@ -185,7 +292,8 @@ import {
   NDrawer, NDrawerContent, NForm, NFormItem, NInput, NPopover, NFlex,
   NRadioGroup, NRadio, NSwitch, NButton, NSpace, NDivider, NIcon,
   NTabs, NTabPane, NList, NListItem, NPopconfirm, NTag, NAlert, 
-  NModal, NSelect, NCheckboxGroup, NCheckbox, NText, useMessage
+  NModal, NSelect, NCheckboxGroup, NCheckbox, NText, useMessage, NSlider,
+  NInputNumber, NCollapseItem, NCollapse
 } from 'naive-ui'
 import { useChatStore } from '@/stores/chat'
 import { useConfigStore, type ModelConfig } from '@/stores/config'
@@ -373,7 +481,16 @@ async function loadTools() {
 const profileModalVisible = ref(false)
 const isEditing = ref(false)
 const editingProfile = ref<Profile | null>(null)
-const profileForm = reactive({ name: '', tools: [] as string[], profile_prompt: '' })
+const profileForm = reactive({
+  name: '',
+  tools: [] as string[],
+  profile_prompt: '',
+  temperature: 1,
+  top_p: 1,
+  top_k: 40,
+  frequency_penalty: 0,
+  presence_penalty: 0
+})
 
 const profileOptions = computed(() =>
   profileStore.profiles.map(p => ({ label: p.name, value: p.id }))
@@ -387,8 +504,13 @@ function openCreateProfile() {
   editingProfile.value = null
   profileForm.name = ''
   profileForm.tools = []
-  profileModalVisible.value = true
   profileForm.profile_prompt = ''
+  profileForm.temperature = 1
+  profileForm.top_p = 1
+  profileForm.top_k = 40
+  profileForm.frequency_penalty = 0
+  profileForm.presence_penalty = 0
+  profileModalVisible.value = true
 }
 
 function openEditProfile() {
@@ -397,18 +519,54 @@ function openEditProfile() {
     loadTools()
   }
   isEditing.value = true
-  editingProfile.value = { ...profileStore.activeProfile }
-  profileForm.name = editingProfile.value.name
-  profileForm.tools = [...editingProfile.value.tools]
+  const p = profileStore.activeProfile
+  editingProfile.value = { ...p }
+  profileForm.name = p.name
+  profileForm.tools = [...p.tools]
+  profileForm.profile_prompt = p.profile_prompt || ''
+  // 读取角色保存的参数，若旧角色没有则使用默认值
+  profileForm.temperature = p.temperature ?? 1
+  profileForm.top_p = p.top_p ?? 1
+  profileForm.top_k = p.top_k ?? 40
+  profileForm.frequency_penalty = p.frequency_penalty ?? 0
+  profileForm.presence_penalty = p.presence_penalty ?? 0
   profileModalVisible.value = true
-  profileForm.profile_prompt = editingProfile.value.profile_prompt || ''
 }
 
 async function saveProfile() {
+  const payload = {
+    name: profileForm.name,
+    tools: profileForm.tools,
+    profile_prompt: profileForm.profile_prompt,
+    temperature: profileForm.temperature,
+    top_p: profileForm.top_p,
+    top_k: profileForm.top_k,
+    frequency_penalty: profileForm.frequency_penalty,
+    presence_penalty: profileForm.presence_penalty,
+  }
   if (isEditing.value && editingProfile.value) {
-    await profileStore.updateProfile(editingProfile.value.id, profileForm.name, profileForm.tools, profileForm.profile_prompt)
+    await profileStore.updateProfile(
+      editingProfile.value.id,
+      profileForm.name,
+      profileForm.tools,
+      profileForm.profile_prompt,
+      profileForm.temperature,
+      profileForm.top_p,
+      profileForm.top_k,
+      profileForm.frequency_penalty,
+      profileForm.presence_penalty
+    )
   } else {
-    await profileStore.createProfile(profileForm.name, profileForm.tools, profileForm.profile_prompt)
+    await profileStore.createProfile(
+      profileForm.name,
+      profileForm.tools,
+      profileForm.profile_prompt,
+      profileForm.temperature,
+      profileForm.top_p,
+      profileForm.top_k,
+      profileForm.frequency_penalty,
+      profileForm.presence_penalty
+    )
   }
   profileModalVisible.value = false
 }

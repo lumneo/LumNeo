@@ -38,7 +38,12 @@ async def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             tools TEXT NOT NULL DEFAULT '[]',
-            profile_prompt TEXT DEFAULT ''
+            profile_prompt TEXT DEFAULT '',
+            temperature REAL DEFAULT 1.0,
+            top_p REAL DEFAULT 1.0,
+            top_k INTEGER DEFAULT 40,
+            frequency_penalty REAL DEFAULT 0.0,
+            presence_penalty REAL DEFAULT 0.0
         )
     """)
 
