@@ -226,6 +226,10 @@ pre code.hljs {
   font-family: Consolas, '微软雅黑', monospace;
 }
 
+.streaming pre code.hljs {
+  max-height: none;
+}
+
 /* 浅色模式覆盖 */
 [theme-mode="light"] pre {
   background: #f6f8fa;

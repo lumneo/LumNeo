@@ -3,10 +3,16 @@ import { useChatStore, type Message } from '@/stores/chat'
 
 
 function cleanReasoning(content: string) {
-  return content.replace(/<!--reasoning:start-->[\s\S]*?<!--reasoning:end(:\d+\.\d+)?-->/g, '')
+  return content
+    .replace(/<!--reasoning:start-->[\s\S]*?<!--reasoning:end(:\d+\.\d+)?-->/g, '')
     .replace(/<!--tool_calls:start-->[\s\S]*?<!--tool_calls:end-->/g, '')
     .replace(/<!--token_usage:.*?-->/g, '')
     .replace(/<!--thinking_time:.*?-->/g, '')
+    // 新增：清理流式工具调用预览快照
+    .replace(/<!--tool_preview:.*?-->/g, '')
+    // 新增：清理流式过程中的临时状态提示（如“准备执行操作…”）
+    .replace(/<!--status:show:[^>]+-->[\s\S]*?<!--status:hide:[^>]+-->/g, '')
+    // 保留原有的未闭合标记清理（思考块、工具调用块开始标记）
     .replace(/<!--reasoning:start-->/g, '')
     .replace(/<!--tool_calls:start-->/g, '')
     .replace(/\n{3,}/g, '\n\n')

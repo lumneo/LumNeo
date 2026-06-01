@@ -171,89 +171,118 @@ export function processMessageContent(text: string, isStreaming = false): string
     }
   }
 
+  // 匹配所有 tool_preview 标记，取最后一个（即最新状态）
+  const previewRegex = /<!--tool_preview:(.*?)-->/g;
+  let lastPreviewMatch: RegExpExecArray | null = null;
+  let match;
+  while ((match = previewRegex.exec(processedText)) !== null) {
+    lastPreviewMatch = match;
+  }
+  if (lastPreviewMatch) {
+    try {
+      const snapshot = JSON.parse(lastPreviewMatch[1]);
+      let cardsHtml = ''
+      let count = 0
+
+      for (const [id, info] of Object.entries(snapshot) as any) {
+        const name = info.name || '未知工具'
+        let argsStr = info.arguments || ''
+
+        try {
+          const parsed = JSON.parse(argsStr);
+          argsStr = JSON.stringify(parsed, null, 2)
+        } catch {}
+
+        cardsHtml += `<div class="tool-call-card streaming">
+          <span class="tool-name">🛠 ${escapeHtml(name)}</span>
+          <pre class="tool-args"><code>${escapeHtml(argsStr)}</code></pre>
+        </div>`
+        count++
+      }
+
+      const title = count > 0 ? `🔧 工具调用中… (${count}个)` : '🔧 工具调用中…'
+      const html = `<div class="tool-calls-block" data-tool="open">
+        <div class="tool-summary no-select">${title}</div>
+        <div class="tool-calls-container">
+          <div class="tool-inner">${cardsHtml}</div>
+        </div>
+      </div>`
+
+      const key = `<!--BLOCK_${blockMap.size}-->`
+      // ✅ 替换掉最后一个预览标记（即最新状态），保留原位
+      processedText = processedText.replace(lastPreviewMatch[0], key)
+      blockMap.set(key, html)
+    } catch (e) {
+      // 解析失败则忽略
+    }
+  }
+
   // 2.1 移除成对出现的临时状态提示（show → hide）
   processedText = processedText.replace(/<!--status:show:([^>]+)-->([\s\S]*?)<!--status:hide:([^>]+)-->/g, '')
 
-  // 3. 处理工具调用块
+  // 3. 处理工具调用块（顺序保留）
   processedText = processedText.replace(
     /<!--tool_calls:start-->([\s\S]*?)<!--tool_calls:end-->/g,
     (_, inner) => {
-        let cardsHtml = ''
-        
-        // 提取工具调用信息 (使用 [\s\S]*? 支持多行)
-        inner.replace(/<!--tool_call:([\s\S]*?)-->/g, (_:string, b64Str:string) => {
-          
-            try {
-                let tool: any
+      let cardsHtml = ''
 
-                const decodedJson = decodeURIComponent(escape(window.atob(b64Str.trim())))
-                tool = JSON.parse(decodedJson)
-
-
-                let formatted = tool.arguments
-                if (typeof formatted === 'string') {
-                    try {
-                        const parsed = JSON.parse(formatted)
-                        formatted = JSON.stringify(parsed, null, 2)
-                    } catch {
-                        // 如果 arguments 本身是长文本（比如你刚才写入的 HTML）
-                        formatted = tool.arguments
-                    }
-                } else if (typeof formatted === 'object') {
-                    formatted = JSON.stringify(formatted, null, 2)
-                } else {
-                    formatted = String(formatted)
-                }
-
-                cardsHtml += `<div class="tool-call-card"><span class="tool-name">🛠 ${tool.name || '未知工具'}</span><pre class="tool-args"><code>${escapeHtml(formatted)}</code></pre></div>`
-            } catch (err) {
-                // 【终极兜底方案】：如果连 new Function 都崩了，绝不留白，直接把原始 JSON 字符串塞进去
-                cardsHtml += `<div class="tool-call-card"><span class="tool-name">🛠 工具参数解析失败</span><pre class="tool-args"><code>${escapeHtml(b64Str)}</code></pre></div>`
-            }
-            return ''
-        })
-
-        // 提取工具结果
-        inner.replace(/<!--tool_result:(.*?)-->/g, (_:string, jsonStr:string) => {
+      // 用一个正则同时匹配 tool_call 和 tool_result，按出现顺序处理
+      const tokenRegex = /<!--tool_call:([\s\S]*?)-->|<!--tool_result:(.*?)-->/g
+      let match
+      while ((match = tokenRegex.exec(inner)) !== null) {
+        if (match[1] !== undefined) {
+          // 匹配到 tool_call
+          const b64Str = match[1].trim()
           try {
-              const res = JSON.parse(jsonStr)
-              let formatted = res.result
-
-              // 如果结果是字符串，尝试解析为 JSON 再格式化
-              if (typeof formatted === 'string') {
-                try {
-                    const parsed = JSON.parse(formatted)
-                    formatted = JSON.stringify(parsed, null, 2)
-                } catch {
-                    // 不是 JSON 字符串，保持原样
-                    formatted = res.result
-                }
-              } else if (typeof formatted === 'object') {
-                // 已经是对象，直接序列化
-                formatted = JSON.stringify(formatted, null, 2)
-              } else {
-                // 数字、布尔等简单类型
-                formatted = String(formatted)
-              }
-
-              cardsHtml += `<div class="tool-result"><span class="result-label">📑 结果：</span><pre class="result-content"><code>${escapeHtml(formatted)}</code></pre></div>`
-          } catch (err) {
-                // 结果解析兜底
-                cardsHtml += `<div class="tool-result"><span class="result-label">📑 结果解析失败：</span><pre class="result-content"><code>${escapeHtml(jsonStr)}</code></pre></div>`
+            const decodedJson = decodeURIComponent(escape(window.atob(b64Str)))
+            const tool = JSON.parse(decodedJson)
+            let formatted = tool.arguments
+            // ... 格式化参数（保持你原来的逻辑）
+            if (typeof formatted === 'string') {
+              try {
+                const parsed = JSON.parse(formatted)
+                formatted = JSON.stringify(parsed, null, 2)
+              } catch { /* 原样 */ }
+            } else if (typeof formatted === 'object') {
+              formatted = JSON.stringify(formatted, null, 2)
+            } else {
+              formatted = String(formatted)
             }
-            return ''
-        })
+            cardsHtml += `<div class="tool-call-card"><span class="tool-name">🛠 ${escapeHtml(tool.name || '未知工具')}</span><pre class="tool-args"><code>${escapeHtml(formatted)}</code></pre></div>`
+          } catch {
+            cardsHtml += `<div class="tool-call-card"><span class="tool-name">🛠 工具参数解析失败</span><pre class="tool-args"><code>${escapeHtml(b64Str)}</code></pre></div>`
+          }
+        } else if (match[2] !== undefined) {
+          // 匹配到 tool_result
+          const jsonStr = match[2].trim()
+          try {
+            const res = JSON.parse(jsonStr)
+            let formatted = res.result
+            // ... 格式化结果（保持原逻辑）
+            if (typeof formatted === 'string') {
+              try {
+                const parsed = JSON.parse(formatted)
+                formatted = JSON.stringify(parsed, null, 2)
+              } catch { /* 原样 */ }
+            } else if (typeof formatted === 'object') {
+              formatted = JSON.stringify(formatted, null, 2)
+            } else {
+              formatted = String(formatted)
+            }
+            cardsHtml += `<div class="tool-result"><span class="result-label">📑 结果：</span><pre class="result-content"><code>${escapeHtml(formatted)}</code></pre></div>`
+          } catch {
+            cardsHtml += `<div class="tool-result"><span class="result-label">📑 结果解析失败：</span><pre class="result-content"><code>${escapeHtml(jsonStr)}</code></pre></div>`
+          }
+        }
+      }
 
-        // 统计工具数量
-        const toolCount = (cardsHtml.match(/tool-call-card/g) || []).length
-        const title = toolCount > 0 ? `🔧 工具调用 (${toolCount}个)` : '🔧 工具调用'
+      const toolCount = (cardsHtml.match(/tool-call-card/g) || []).length
+      const title = toolCount > 0 ? `🔧 工具调用 (${toolCount}个)` : '🔧 工具调用'
 
-        // 包装在 details 中
-        const html = `<div class="tool-calls-block" data-tool="open"><div class="tool-summary no-select">${title}</div><div class="tool-calls-container"><div class="tool-inner">${cardsHtml}</div></div></div>`
-
-        const key = `<!--BLOCK_${blockMap.size}-->`
-        blockMap.set(key, html)
-        return key
+      const html = `<div class="tool-calls-block" data-tool="open"><div class="tool-summary no-select">${title}</div><div class="tool-calls-container"><div class="tool-inner">${cardsHtml}</div></div></div>`
+      const key = `<!--BLOCK_${blockMap.size}-->`
+      blockMap.set(key, html)
+      return key
     }
   )
 
