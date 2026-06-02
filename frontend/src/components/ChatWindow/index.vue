@@ -484,7 +484,10 @@ watch(streamingContent, (newVal) => {
     if (renderRafId !== null) cancelAnimationFrame(renderRafId)
     return
   }
-  if (renderRafId !== null) cancelAnimationFrame(renderRafId)
+
+  // 已有待执行的帧，跳过
+  if (renderRafId !== null) return
+  
   renderRafId = requestAnimationFrame(() => {
     streamDisplayHtml.value = renderMessageHtml(newVal, true)
     renderRafId = null
