@@ -12,11 +12,11 @@ from backend.services.tools import get_all_tools, execute_tool
 class LLMService:
     instance: Optional["LLMService"] = None
 
-    def __init__(self, 
-                 model_type: str, 
-                 model_name: str, 
-                 api_key: str = "", 
-                 base_url: str = None, 
+    def __init__(self,
+                 model_type: str,
+                 model_name: str,
+                 api_key: str = "",
+                 base_url: str = None,
                  thinking: str = 'enabled'):
         self.model_type = model_type
         self.model_name = model_name
@@ -29,14 +29,13 @@ class LLMService:
         enable_tools: bool = False,
         tools: Optional[List[Dict]] = None,
         request: Optional[Request] = None,
-        mcp_manager = None,
+        mcp_manager=None,
         params: Dict = None,
     ) -> AsyncGenerator[str, None]:
         params = params or {}
-        
+
         # ---------- 图像生成分支 ----------
         if "image" in self.model_name.lower():
-            # 提取用户消息作为提示词
             prompt = ""
             for msg in reversed(messages):
                 if msg.get("role") == "user":
@@ -47,13 +46,11 @@ class LLMService:
                 yield "❌ 未找到有效的用户提示词，无法生成图像。"
                 return
 
-            # 图像生成参数
             size = params.get("size", "1024x768")
             quality = params.get("quality", "standard")
             n = params.get("n", 1)
 
             try:
-                # 调用图像生成 API，不设置 response_format
                 response = await self.client.images.generate(
                     model=self.model_name,
                     prompt=prompt,
@@ -67,14 +64,11 @@ class LLMService:
                     return
 
                 img_data = response.data[0]
-                
-                # 优先使用 url 字段（标准 OpenAI 图像 API 默认返回）
+
                 if hasattr(img_data, 'url') and img_data.url:
                     image_url = img_data.url
-                    # 以 Markdown 图片格式输出，前端可直接渲染
                     yield f"![生成的图片]({image_url})"
                 else:
-                    # 降级处理：如果确实没有 url，尝试 b64_json（但不符合用户要求，仅作提示）
                     if hasattr(img_data, 'b64_json') and img_data.b64_json:
                         yield "⚠️ 图像生成服务仅返回 base64 数据，无法提供直接链接。"
                     else:
@@ -85,8 +79,8 @@ class LLMService:
                 yield f"❌ 图像生成 API 错误：{e.message}"
             except Exception as e:
                 yield f"❌ 图像生成失败：{str(e)}"
-            return   # 结束，不再执行后续文本生成逻辑
-        
+            return
+
         # ---------- 原有文本生成 + 工具调用分支 ----------
         current_messages = messages.copy()
 
@@ -94,21 +88,33 @@ class LLMService:
             tools = await get_all_tools(mcp_manager)
 
         reasoning_start_time = None
-        final_usage = None
-        
-        pure_generation_time = 0.0
+
+        # 全步骤累计 token（计费总量）
+        total_usage_all_steps = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "completion_tokens_details": {}
+        }
+
+        # 最后一步的 token 和生成耗时（用于展示最终回答速度）
+        last_step_usage = None
+        last_step_generation_time = 0.0
 
         MAX_STEPS = 6
-        
+
         for step in range(MAX_STEPS):
-            tool_call_started = False
-            tool_status_id = ""
             if request and await request.is_disconnected():
                 break
 
-            tool_calls = {}
+            tool_calls_by_index = {}
             reasoning_buffer = ""
             in_reasoning = False
+
+            # 当前步骤的 usage 记录（会在收到 usage chunk 时填充）
+            step_usage_record = None
+            # 当前步骤从第一个 token 开始计时的生成时间
+            step_generation_time = 0.0
 
             kwargs = {
                 "model": self.model_name,
@@ -126,7 +132,7 @@ class LLMService:
                     "preserve_thinking": True
                 }
             }
-            
+
             if step == MAX_STEPS - 1:
                 yield "\n⚠️ 工具调用次数已达上限，正在基于已收集信息生成最终总结...\n"
                 current_messages.append({
@@ -140,25 +146,49 @@ class LLMService:
 
             try:
                 response = await self.client.chat.completions.create(**kwargs)
-
             except APIError as e:
                 yield f"\n❌ 模型服务错误：{e.message}"
                 break
 
             first_token_time = None
+            tool_preview_active = {}
 
             async for chunk in response:
                 if request and await request.is_disconnected():
                     break
 
+                # ---------- usage 收集（无论 choices 是否存在，都处理）----------
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    step_usage = chunk.usage
+                    try:
+                        su = step_usage.model_dump()
+                    except AttributeError:
+                        su = dict(step_usage)
+
+                    # 累加到全步骤总计费 token
+                    total_usage_all_steps["prompt_tokens"] += su.get("prompt_tokens", 0) or 0
+                    total_usage_all_steps["completion_tokens"] += su.get("completion_tokens", 0) or 0
+                    total_usage_all_steps["total_tokens"] += su.get("total_tokens", 0) or 0
+
+                    details = su.get("completion_tokens_details") or {}
+                    for k, v in details.items():
+                        total_usage_all_steps["completion_tokens_details"][k] = \
+                            total_usage_all_steps["completion_tokens_details"].get(k, 0) + (v or 0)
+
+                    # 保存本步 usage（可能会被同一步内多次覆盖，最终保留最后一个）
+                    step_usage_record = {
+                        "prompt_tokens": su.get("prompt_tokens", 0) or 0,
+                        "completion_tokens": su.get("completion_tokens", 0) or 0,
+                        "total_tokens": su.get("total_tokens", 0) or 0,
+                        "completion_tokens_details": details
+                    }
+
                 if chunk.choices:
                     d = chunk.choices[0].delta
                     if first_token_time is None:
                         first_token_time = time.time()
-
-                if not chunk.choices:
-                    if hasattr(chunk, 'usage') and chunk.usage:
-                        final_usage = chunk.usage
+                else:
+                    # 无 choices 的 chunk（如仅含 usage）直接跳过后续内容处理
                     continue
 
                 delta = chunk.choices[0].delta
@@ -181,56 +211,88 @@ class LLMService:
                     in_reasoning = False
 
                 if tool_calls_data:
-                    if not tool_call_started:
-                        tool_status_id = f"tool-{uuid.uuid4().hex[:6]}"
-                        yield f"\n<!--status:show:{tool_status_id}-->🔧 准备执行操作..."
-                        tool_call_started = True
                     for tc_delta in tool_calls_data:
-                        if not tc_delta.id and tool_calls:
-                            last_id = list(tool_calls.keys())[-1]
-                            target = tool_calls[last_id]
-                            if tc_delta.function:
-                                target["function"]["name"] += (tc_delta.function.name or "")
-                                target["function"]["arguments"] += (tc_delta.function.arguments or "")
-                            continue
+                        idx = getattr(tc_delta, 'index', None)
+                        if idx is None:
+                            idx = tc_delta.id if tc_delta.id else str(uuid.uuid4())
 
-                        tc_id = tc_delta.id
-                        if tc_id not in tool_calls:
-                            tool_calls[tc_id] = {
-                                "id": tc_id,
+                        if idx not in tool_preview_active and tc_delta.function:
+                            func_name = tc_delta.function.name or ""
+                            tool_preview_active[idx] = func_name
+                            yield f"<!--tool_preview:start:{idx}:{func_name}-->"
+
+                        if idx not in tool_calls_by_index:
+                            tool_calls_by_index[idx] = {
+                                "id": getattr(tc_delta, 'id', None),
                                 "type": "function",
                                 "function": {"name": "", "arguments": ""}
                             }
+                        target = tool_calls_by_index[idx]
+                        if tc_delta.id:
+                            target["id"] = tc_delta.id
                         if tc_delta.function:
-                            tool_calls[tc_id]["function"]["name"] += (tc_delta.function.name or "")
-                            tool_calls[tc_id]["function"]["arguments"] += (tc_delta.function.arguments or "")
+                            # 只在 name 未赋值时赋予，避免重复拼接
+                            if tc_delta.function.name and not target["function"]["name"]:
+                                target["function"]["name"] = tc_delta.function.name
+                            arg_delta = tc_delta.function.arguments or ""
+                            target["function"]["arguments"] += arg_delta
+                            if arg_delta:
+                                yield arg_delta
 
-                    # 每收到任何工具调用片段，立刻把当前 tool_calls 的快照发给前端
-                    if tool_calls:  # 如果有工具调用数据就发送
-                        snapshot = {}
-                        for tid, tc in tool_calls.items():
-                            snapshot[tid] = {
-                                "name": tc["function"]["name"],
-                                "arguments": tc["function"]["arguments"]
-                            }
-                        yield f"<!--tool_preview:{json.dumps(snapshot)}-->"
                 elif delta_content:
+                    # 关闭所有活跃的 tool_preview
+                    for idx in list(tool_preview_active.keys()):
+                        tc = tool_calls_by_index.get(idx)
+                        if tc:
+                            snapshot = {tc["id"]: {"name": tc["function"]["name"], "arguments": tc["function"]["arguments"]}}
+                            yield f"<!--tool_preview:end:{idx}:{json.dumps(snapshot)}-->"
+                        else:
+                            yield f"<!--tool_preview:end:{idx}:{{}}-->"
+                        del tool_preview_active[idx]
                     yield delta_content
 
+            # 循环结束后处理可能残留的 tool_preview
+            if tool_preview_active:
+                for idx in list(tool_preview_active.keys()):
+                    tc = tool_calls_by_index.get(idx)
+                    if tc:
+                        snapshot = {tc["id"]: {"name": tc["function"]["name"], "arguments": tc["function"]["arguments"]}}
+                        yield f"<!--tool_preview:end:{idx}:{json.dumps(snapshot)}-->"
+                    else:
+                        yield f"<!--tool_preview:end:{idx}:{{}}-->"
+                    del tool_preview_active[idx]
+
+            # 记录本步骤生成时间
             if first_token_time is not None:
-                pure_generation_time += (time.time() - first_token_time)
+                step_generation_time = time.time() - first_token_time
+                # 将步骤时间赋值给最后一步记录变量（下一步的循环会覆盖）
+                last_step_generation_time = step_generation_time
 
             if in_reasoning:
                 reasoning_time = time.time() - reasoning_start_time
                 yield f"<!--reasoning:end:{reasoning_time:.2f}-->"
 
-            if tool_calls:
-                if request and await request.is_disconnected():
-                    break
+            # 将收集到的 usage 记录赋给最后一步
+            if step_usage_record:
+                last_step_usage = step_usage_record
+
+            # 构建工具调用字典
+            tool_calls = {}
+            for idx, tc in tool_calls_by_index.items():
+                if tc.get("id"):
+                    tool_calls[tc["id"]] = tc
+                else:
+                    temp_id = f"call_{idx}"
+                    tc["id"] = temp_id
+                    tool_calls[temp_id] = tc
+
+            if tool_calls and request and await request.is_disconnected():
+                break
 
             if not tool_calls:
                 break
 
+            # 过滤无效工具调用
             valid_calls = {}
             for tid, tc in tool_calls.items():
                 if tc["function"]["name"].strip():
@@ -240,11 +302,8 @@ class LLMService:
 
             if not valid_calls:
                 break
-            else:
-                if tool_status_id:
-                    yield f"<!--status:hide:{tool_status_id}-->"
 
-            yield "\n<!--tool_calls:start-->🔧 检测到工具调用..."
+            yield f"\n<!--tool_calls:start-->"
 
             assistant_msg = {
                 "role": "assistant",
@@ -255,9 +314,12 @@ class LLMService:
 
             for tc in valid_calls.values():
                 func_name = tc["function"]["name"]
+                raw_args = tc["function"]["arguments"]
                 try:
-                    args = json.loads(tc["function"]["arguments"])
-                except json.JSONDecodeError:
+                    args = json.loads(raw_args)
+                except json.JSONDecodeError as e:
+                    error_detail = f"JSON 解析失败: {e}\n原始参数: {raw_args[:200]}"
+                    yield f"\n❌ 工具 `{func_name}` 参数错误：{error_detail}\n"
                     args = {}
 
                 try:
@@ -267,6 +329,7 @@ class LLMService:
                     if len(error_msg) > 1000:
                         error_msg = error_msg[:1000] + "...(错误信息过长已截断)"
                     result = f"工具执行出错: {error_msg}"
+
                 result_str = str(result)
                 json_str = json.dumps({'name': func_name, 'arguments': args})
                 b64_str = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
@@ -279,23 +342,13 @@ class LLMService:
                     "content": result_str
                 })
             yield "<!--tool_calls:end-->"
-            
-        if final_usage:
-            try:
-                usage_dict = final_usage.model_dump()
-            except AttributeError:
-                usage_dict = dict(final_usage)
 
-            completion_tokens = usage_dict.get('completion_tokens', 0) or 0
-            details = usage_dict.get('completion_tokens_details') or {}
-            reasoning_tokens = details.get('reasoning_tokens', 0) or 0
-
-            if pure_generation_time > 0:
-                speed = completion_tokens / pure_generation_time
-            else:
-                speed = 0.0
-
-            usage_dict['speed'] = f"{speed:.2f} token/s"
-            usage_dict['total_tokens'] = completion_tokens
-            usage_dict['reasoning_tokens'] = reasoning_tokens
-            yield f"\n<!--token_usage:{json.dumps(usage_dict)}-->"
+        # ---------- 最终 token 统计输出 ----------
+        if last_step_usage and last_step_usage["completion_tokens"] > 0:
+            speed = last_step_usage["completion_tokens"] / last_step_generation_time if last_step_generation_time > 0 else 0.0
+            token_info = {
+                "final_answer_usage": last_step_usage,
+                "total_usage_all_steps": total_usage_all_steps,
+                "speed": f"{speed:.2f} token/s"
+            }
+            yield f"\n<!--token_usage:{json.dumps(token_info)}-->"

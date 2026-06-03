@@ -1,10 +1,9 @@
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, type Ref } from 'vue'
 import mermaid from 'mermaid'
 import { useMessage } from 'naive-ui'
 
-export function useCodeEnhancer() {
+export function useCodeEnhancer(containerRef: Ref<HTMLElement | null>) {
   const message = useMessage()
-  const messageListRef = ref<HTMLElement | null>(null)
 
   let observer: MutationObserver | null = null
   const isStreaming = ref(false)
@@ -16,15 +15,68 @@ export function useCodeEnhancer() {
 
 
   /**
+   * 为所有匹配的 a 标签根据文件类型添加 class
+   * @param {string|HTMLElement} container - 容器元素或选择器，例如 '#content' 或 document.body
+   * @param {boolean} recursive - 是否递归查找后代元素，默认 true
+   */
+  async function addFileTypeClassToLinks(container: string|HTMLElement, recursive: boolean = true) {
+    // 获取容器元素  
+    const root = typeof container === 'string' 
+      ? document.querySelector(container) 
+      : container
+      
+    if (!root) return
+
+    // 获取容器内的所有 a 标签
+    const links: any = recursive 
+      ? root.querySelectorAll('a') 
+      : root.children
+
+    // 文件类型映射表
+    const typeMap = [
+      { extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'], class: 'file-image' },
+      { extensions: ['pdf'], class: 'file-pdf' },
+      { extensions: ['doc', 'docx'], class: 'file-word' },
+      { extensions: ['xls', 'xlsx'], class: 'file-excel' },
+      { extensions: ['ppt', 'pptx'], class: 'file-powerpoint' },
+      { extensions: ['txt', 'md', 'rtf'], class: 'file-text' },
+      { extensions: ['zip', 'rar', '7z', 'tar', 'gz'], class: 'file-archive' },
+      { extensions: ['mp3', 'wav', 'flac', 'aac'], class: 'file-audio' },
+      { extensions: ['mp4', 'webm', 'avi', 'mov', 'mkv'], class: 'file-video' },
+    ]
+
+    links.forEach((link: HTMLElement) => {
+      const href = link.getAttribute('href')
+      
+      if (!href) return
+
+      // 提取文件扩展名（忽略查询参数和哈希）
+      let ext = href.split('?')[0].split('#')[0].split('.').pop()
+      if (!ext) return
+      ext = ext.toLowerCase()
+
+      // 查找匹配的类型
+      const matched = typeMap.find(item => item.extensions.includes(ext))
+      if (matched) {
+        link.classList.add(matched.class)
+      } else {
+        // 可选：未知类型添加通用 class
+        link.classList.add('file-unknown')
+      }
+      link.setAttribute('target', '_blank')
+      link.setAttribute('download', link.textContent?.trim() || '')
+    })
+  }
+  /**
    * 为所有代码块添加复制按钮
    */
   async function addCopyButtons() {
     if (isStreaming.value) return
     await nextTick()
-    if (!messageListRef.value) return
-
-    const pres = messageListRef.value.querySelectorAll('pre:not([data-copy-added])')
-
+    if (!containerRef.value) return
+    
+    const pres = containerRef.value.querySelectorAll('pre:not([data-copy-added])')
+    
     pres.forEach((pre) => {
       pre.setAttribute('data-copy-added', 'true')
       const btn = document.createElement('button')
@@ -94,15 +146,16 @@ export function useCodeEnhancer() {
 
   // 启动自动观察
   function startObserving() {
-    if (!messageListRef.value) return
+    if (!containerRef.value) return
     // 立即添加一次已有代码块
     addCopyButtons()
     // 监听新节点
     observer = new MutationObserver(() => {
       addCopyButtons()
       renderMermaidDiagrams()
+      addFileTypeClassToLinks(containerRef.value!)
     })
-    observer.observe(messageListRef.value, {
+    observer.observe(containerRef.value, {
       childList: true,
       subtree: true,
     })
@@ -119,9 +172,9 @@ export function useCodeEnhancer() {
    */
   async function renderMermaidDiagrams() {
     await nextTick()
-    if (!messageListRef.value) return
+    if (!containerRef.value) return
 
-    const mermaidCodes = messageListRef.value.querySelectorAll(
+    const mermaidCodes = containerRef.value.querySelectorAll(
       'pre code.language-mermaid'
     )
     for (const codeEl of mermaidCodes) {
@@ -148,8 +201,9 @@ export function useCodeEnhancer() {
   }
 
   return {
-    messageListRef,
+    containerRef,
     addCopyButtons,
+    addFileTypeClassToLinks,
     renderMermaidDiagrams,
     startObserving,
     stopObserving,

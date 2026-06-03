@@ -3,7 +3,7 @@ import { useChatStore, type Message } from '@/stores/chat'
 import { useConfigStore } from '@/stores/config'
 import { useProfileStore } from '@/stores/profiles'
 import { useMessage } from 'naive-ui'
-import { cleanMessages, addFileTypeClassToLinks, renderMessageHtml } from '@/utils/message'
+import { cleanMessages, renderMessageHtml } from '@/utils/message'
 import type { UploadedFile } from '@/composables/useFileUpload'
 
 
@@ -18,12 +18,6 @@ export function useChat() {
   const streamingContent = ref('')
   const abortController = ref<AbortController | null>(null)
   const regeneratingMsg = ref<Message | null>(null)
-
-  watch(() => streamingContent.value, (newVal: string) => {
-    if (!newVal) {
-      setTimeout(() => addFileTypeClassToLinks(document.body), 150)
-    }
-  })
 
   function stopGeneration() {
     if (abortController.value) {
@@ -86,6 +80,8 @@ export function useChat() {
       return
     }
 
+    const chatId = chatStore.activeChatId
+
     // 1. 构建用户消息
     const displayContent = currentInput.value.trim()
     const userMsg: Message = {
@@ -146,23 +142,27 @@ export function useChat() {
 
       fullText = await readStream(response, scrollToBottom)
 
-      const assistantMsg: Message = { role: 'assistant', content: fullText }
-      assistantMsg.renderedHtml = renderMessageHtml(fullText, true)
-      chatStore.addMessageToLocal(assistantMsg)
-      chatStore.saveMessageToBackend(assistantMsg).catch((e) => console.warn('保存助手消息失败', e))
+      if (chatStore.activeChatId === chatId) {
+        const assistantMsg: Message = { role: 'assistant', content: fullText }
+        assistantMsg.renderedHtml = renderMessageHtml(fullText, true)
+        chatStore.addMessageToLocal(assistantMsg)
+        chatStore.saveMessageToBackend(assistantMsg).catch((e) => console.warn('保存助手消息失败', e))
+      }
 
     } catch (error: any) {
       if (error.name === 'AbortError') return
-      console.error('发送失败:', error)
-      const errorMsg: Message = { role: 'assistant', content: `**错误：** ${error.message}` }
-      chatStore.addMessageToLocal(errorMsg)
-      chatStore.saveMessageToBackend(errorMsg).catch((e) => console.warn('保存错误消息失败', e))
+      if (chatStore.activeChatId === chatId) {
+        console.error('发送失败:', error)
+        const errorMsg: Message = { role: 'assistant', content: `**错误：** ${error.message}` }
+        chatStore.addMessageToLocal(errorMsg)
+        chatStore.saveMessageToBackend(errorMsg).catch((e) => console.warn('保存错误消息失败', e))
+      }
     } finally {
       abortController.value = null
       isLoading.value = false
       streamingContent.value = ''
       // 流结束后，触发外部传入的缓存回调
-      if (onStreamEnd.value && fullText) {
+      if (onStreamEnd.value && fullText && chatStore.activeChatId === chatId) {
         onStreamEnd.value(fullText) 
       }
     }

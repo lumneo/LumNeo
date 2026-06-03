@@ -23,7 +23,6 @@ mermaid.initialize({
   }
 })
 
-
 marked.use({
   extensions: [
       {
@@ -31,18 +30,18 @@ marked.use({
           level: 'inline',           // 规则作用范围为行内元素
           start(src) {
               // 查找单个波浪号的位置
-              return src.match(/~[^~]/)?.index;
+              return src.match(/~[^~]/)?.index
           },
           tokenizer(src, _tokens) {
               // 匹配被单个波浪号包裹的内容（非贪婪模式）
-              const match = src.match(/^~([^~]+)~/);
+              const match = src.match(/^~([^~]+)~/)
               if (match) {
                   // 若匹配成功，则返回一个普通的文本节点，保持原样
                   return {
                       type: 'text',
                       raw: match[0],
                       text: match[0],
-                  };
+                  }
               }
               return undefined; // 未匹配则返回 undefined，交由其他解析器处理
           },
@@ -71,60 +70,6 @@ marked.use(markedKatex({
   strict: 'ignore'
 }))
 
-/**
- * 为所有匹配的 a 标签根据文件类型添加 class
- * @param {string|HTMLElement} container - 容器元素或选择器，例如 '#content' 或 document.body
- * @param {boolean} recursive - 是否递归查找后代元素，默认 true
- */
-export function addFileTypeClassToLinks(container: string|HTMLElement, recursive: boolean = true) {
-  // 获取容器元素  
-  const root = typeof container === 'string' 
-    ? document.querySelector(container) 
-    : container
-    
-  if (!root) return
-
-  // 获取容器内的所有 a 标签
-  const links: any = recursive 
-    ? root.querySelectorAll('a') 
-    : root.children
-
-  // 文件类型映射表
-  const typeMap = [
-    { extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'], class: 'file-image' },
-    { extensions: ['pdf'], class: 'file-pdf' },
-    { extensions: ['doc', 'docx'], class: 'file-word' },
-    { extensions: ['xls', 'xlsx'], class: 'file-excel' },
-    { extensions: ['ppt', 'pptx'], class: 'file-powerpoint' },
-    { extensions: ['txt', 'md', 'rtf'], class: 'file-text' },
-    { extensions: ['zip', 'rar', '7z', 'tar', 'gz'], class: 'file-archive' },
-    { extensions: ['mp3', 'wav', 'flac', 'aac'], class: 'file-audio' },
-    { extensions: ['mp4', 'webm', 'avi', 'mov', 'mkv'], class: 'file-video' },
-  ]
-
-  links.forEach((link: HTMLElement) => {
-    const href = link.getAttribute('href')
-    
-    if (!href) return
-
-    // 提取文件扩展名（忽略查询参数和哈希）
-    let ext = href.split('?')[0].split('#')[0].split('.').pop()
-    if (!ext) return
-    ext = ext.toLowerCase()
-
-    // 查找匹配的类型
-    const matched = typeMap.find(item => item.extensions.includes(ext))
-    if (matched) {
-      link.classList.add(matched.class)
-    } else {
-      // 可选：未知类型添加通用 class
-      link.classList.add('file-unknown')
-    }
-    link.setAttribute('target', '_blank')
-    link.setAttribute('download', link.textContent?.trim() || '')
-  })
-}
-
 /** 转义 HTML 特殊字符，防止被浏览器渲染 */
 function escapeHtml(text: string): string {
   return text
@@ -152,7 +97,7 @@ export function processMessageContent(text: string, isStreaming = false): string
     (_, content, time) => {
       const key = `<!--BLOCK_0${blockMap.size}-->` // 使用 HTML 注释占位符
       const timeStr = time ? ` (${time}秒)` : ''
-      const html = `<div class="reasoning-block" data-reasoning="open"><div class="reasoning-summary no-select">💭 已思考 ${timeStr}</div><div class="reasoning-content"><div class="reasoning-inner">${marked.parse(content)}</div></div></div>`
+      const html = `<div class="reasoning-block"><div class="reasoning-summary no-select">💭 已思考 ${timeStr}</div><div class="reasoning-content"><div class="reasoning-inner">${marked.parse(content)}</div></div></div>`
       blockMap.set(key, html)
       return key
     }
@@ -171,37 +116,96 @@ export function processMessageContent(text: string, isStreaming = false): string
     }
   }
 
-  // 匹配所有 tool_preview 标记，取最后一个（即最新状态）
-  const previewRegex = /<!--tool_preview:(.*?)-->/g;
-  let lastPreviewMatch: RegExpExecArray | null = null;
-  let match;
-  while ((match = previewRegex.exec(processedText)) !== null) {
-    lastPreviewMatch = match;
+  // 如果已经出现最终的工具调用块，则清除所有工具预览标记，避免同时显示两个块
+  const hasToolCallsStart = processedText.includes('<!--tool_calls:start-->')
+  const hasToolCallsEnd   = processedText.includes('<!--tool_calls:end-->')
+  const shouldClearPreview = hasToolCallsStart && (!isStreaming || hasToolCallsEnd)
+
+  if (shouldClearPreview) {
+      // 删除闭合的预览段
+      processedText = processedText.replace(/<!--tool_preview:start:\S+?:.*?-->[\s\S]*?<!--tool_preview:end:\S+?:.*?-->/g, '')
+      // 删除未闭合的预览段
+      processedText = processedText.replace(/<!--tool_preview:start:\S+?:.*?-->[\s\S]*$/g, '')
+      // 清理残留 end
+      processedText = processedText.replace(/<!--tool_preview:end:\S+?:.*?-->/g, '')
   }
-  if (lastPreviewMatch) {
-    try {
-      const snapshot = JSON.parse(lastPreviewMatch[1]);
-      let cardsHtml = ''
-      let count = 0
 
-      for (const [id, info] of Object.entries(snapshot) as any) {
-        const name = info.name || '未知工具'
-        let argsStr = info.arguments || ''
+  // 仅在还没有最终工具调用块时，才渲染工具预览
+  if (!processedText.includes('<!--tool_calls:start-->')) {
+    const startRegex = /<!--tool_preview:start:(\S+?):(.*?)-->/g
+    const endRegex = /<!--tool_preview:end:(\S+?):.*?-->/g
 
-        try {
-          const parsed = JSON.parse(argsStr);
-          argsStr = JSON.stringify(parsed, null, 2)
-        } catch {}
+    let firstStart = -1
+    let lastEnd = -1
+    let startMatch
 
-        cardsHtml += `<div class="tool-call-card streaming">
-          <span class="tool-name">🛠 ${escapeHtml(name)}</span>
-          <pre class="tool-args"><code>${escapeHtml(argsStr)}</code></pre>
-        </div>`
-        count++
+    // 找到第一个 start
+    startRegex.lastIndex = 0
+    if ((startMatch = startRegex.exec(processedText)) !== null) {
+      firstStart = startMatch.index
+    }
+
+    // 找到最后一个 end
+    let endMatch
+    endRegex.lastIndex = 0
+    while ((endMatch = endRegex.exec(processedText)) !== null) {
+      lastEnd = endMatch.index + endMatch[0].length
+    }
+
+    if (firstStart !== -1) {
+      const previewRegionEnd = lastEnd !== -1 ? lastEnd : processedText.length
+      const previewRegion = processedText.substring(firstStart, previewRegionEnd)
+
+      // 重新扫描区域内所有 start / end，按 idx 分组
+      const idxSet = new Set<string>()
+      const startPositions: Array<{ idx: string; name: string; pos: number }> = []
+      const endPositions: Array<{ idx: string; pos: number }> = []
+
+      startRegex.lastIndex = 0
+      let sMatch
+      while ((sMatch = startRegex.exec(previewRegion)) !== null) {
+        startPositions.push({
+          idx: sMatch[1],
+          name: sMatch[2],
+          pos: sMatch.index + sMatch[0].length
+        })
+        idxSet.add(sMatch[1])
+      }
+      endRegex.lastIndex = 0
+      let eMatch
+      while ((eMatch = endRegex.exec(previewRegion)) !== null) {
+        endPositions.push({ idx: eMatch[1], pos: eMatch.index })
       }
 
-      const title = count > 0 ? `🔧 工具调用中… (${count}个)` : '🔧 工具调用中…'
-      const html = `<div class="tool-calls-block" data-tool="open">
+      // 提取每个工具的参数文本
+      const cards: Array<{ name: string; args: string; streaming: boolean }> = []
+      for (const idx of idxSet) {
+        const sItem = startPositions.find(s => s.idx === idx)
+        const eItem = endPositions.find(e => e.idx === idx)
+        const name = sItem?.name || ''
+        const startIdx = sItem?.pos ?? 0
+        const endIdx = eItem?.pos ?? previewRegion.length
+        const argsRaw = previewRegion.substring(startIdx, endIdx).trim()
+        cards.push({ name, args: argsRaw, streaming: !eItem })
+      }
+
+      // 生成卡片 HTML
+      let cardsHtml = ''
+      for (const card of cards) {
+        let formattedArgs = card.args
+        try {
+          const parsed = JSON.parse(formattedArgs)
+          formattedArgs = JSON.stringify(parsed, null, 2)
+        } catch {}
+        cardsHtml += `<div class="tool-call-card streaming">
+          <span class="tool-name">🛠 ${escapeHtml(card.name)}</span>
+          <pre class="tool-args"><code>${escapeHtml(formattedArgs)}</code></pre>
+        </div>`
+      }
+
+      const toolCount = cards.length
+      const title = toolCount > 0 ? `🔧 工具调用中… (${toolCount}个)` : '🔧 工具调用中…'
+      const blockHtml = `<div class="tool-calls-block" data-tool="open">
         <div class="tool-summary no-select">${title}</div>
         <div class="tool-calls-container">
           <div class="tool-inner">${cardsHtml}</div>
@@ -209,16 +213,10 @@ export function processMessageContent(text: string, isStreaming = false): string
       </div>`
 
       const key = `<!--BLOCK_${blockMap.size}-->`
-      // ✅ 替换掉最后一个预览标记（即最新状态），保留原位
-      processedText = processedText.replace(lastPreviewMatch[0], key)
-      blockMap.set(key, html)
-    } catch (e) {
-      // 解析失败则忽略
+      processedText = processedText.substring(0, firstStart) + key + processedText.substring(previewRegionEnd)
+      blockMap.set(key, blockHtml)
     }
   }
-
-  // 2.1 移除成对出现的临时状态提示（show → hide）
-  processedText = processedText.replace(/<!--status:show:([^>]+)-->([\s\S]*?)<!--status:hide:([^>]+)-->/g, '')
 
   // 3. 处理工具调用块（顺序保留）
   processedText = processedText.replace(
@@ -279,7 +277,7 @@ export function processMessageContent(text: string, isStreaming = false): string
       const toolCount = (cardsHtml.match(/tool-call-card/g) || []).length
       const title = toolCount > 0 ? `🔧 工具调用 (${toolCount}个)` : '🔧 工具调用'
 
-      const html = `<div class="tool-calls-block" data-tool="open"><div class="tool-summary no-select">${title}</div><div class="tool-calls-container"><div class="tool-inner">${cardsHtml}</div></div></div>`
+      const html = `<div class="tool-calls-block"><div class="tool-summary no-select">${title}</div><div class="tool-calls-container"><div class="tool-inner">${cardsHtml}</div></div></div>`
       const key = `<!--BLOCK_${blockMap.size}-->`
       blockMap.set(key, html)
       return key
@@ -293,11 +291,14 @@ export function processMessageContent(text: string, isStreaming = false): string
       /<!--token_usage:(.*?)-->/g,
       (_, jsonStr) => {
         try {
-          const usage = JSON.parse(jsonStr);
-          const html = `<div class="token-usage">
-            <span title="速度">🚀 ${usage.speed}</span>
-            <span title="总计">📊 ${usage.total_tokens} token</span>
-          </div>`
+          const data = JSON.parse(jsonStr)
+          const speed = data.speed || '0 token/s'
+          const completionTokens = data.final_answer_usage?.completion_tokens ?? 0
+          // const totalTokens = data.total_usage_all_steps?.total_tokens ?? 0
+
+          let html = `<div class="token-usage"><span title="生成速度">🚀 ${speed}</span><span title="本次回答消耗"> 📈 ${completionTokens} token</span>`
+
+          html += `</div>`
           const key = `<!--BLOCK_${blockMap.size}-->`
           blockMap.set(key, html)
           return key
@@ -307,6 +308,8 @@ export function processMessageContent(text: string, isStreaming = false): string
       }
     )
   } else {
+    // 有工具调用的场景：你也可以选择显示 token 统计，例如在工具调用结果之后展示
+    // 这里保留原逻辑，直接移除 token_usage 注释
     processedText = processedText.replace(/<!--token_usage:.*?-->/g, '')
   }
 
