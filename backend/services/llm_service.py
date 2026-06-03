@@ -96,6 +96,13 @@ class LLMService:
         pure_generation_time = 0.0
 
         MAX_STEPS = 6
+
+        total_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "completion_tokens_details": {"reasoning_tokens": 0}  # 可扩展其他字段
+        }
         
         for step in range(MAX_STEPS):
             if request and await request.is_disconnected():
@@ -154,7 +161,19 @@ class LLMService:
 
                 if not chunk.choices:
                     if hasattr(chunk, 'usage') and chunk.usage:
-                        final_usage = chunk.usage
+                        # 累加本 step 的 usage
+                        step_usage = chunk.usage
+                        try:
+                            su = step_usage.model_dump()
+                        except AttributeError:
+                            su = dict(step_usage)
+
+                        total_usage["prompt_tokens"] += su.get("prompt_tokens", 0) or 0
+                        total_usage["completion_tokens"] += su.get("completion_tokens", 0) or 0
+                        total_usage["total_tokens"] += su.get("total_tokens", 0) or 0
+
+                        details = su.get("completion_tokens_details") or {}
+                        total_usage["completion_tokens_details"]["reasoning_tokens"] += details.get("reasoning_tokens", 0) or 0
                     continue
 
                 delta = chunk.choices[0].delta
@@ -201,7 +220,7 @@ class LLMService:
                             target["id"] = tc_delta.id
                         if tc_delta.function:
                             target["function"]["name"] += (tc_delta.function.name or "")
-                            # 参数增量直接输出（就像 reasoning 文本一样）
+                            target["function"]["arguments"] += (tc_delta.function.arguments or "")
                             arg_delta = tc_delta.function.arguments or ""
                             if arg_delta:
                                 yield arg_delta
@@ -313,22 +332,7 @@ class LLMService:
             yield "<!--tool_calls:end-->"
         
         # 最终 token 统计
-        if final_usage:
-            try:
-                usage_dict = final_usage.model_dump()
-            except AttributeError:
-                usage_dict = dict(final_usage)
-
-            completion_tokens = usage_dict.get('completion_tokens', 0) or 0
-            details = usage_dict.get('completion_tokens_details') or {}
-            reasoning_tokens = details.get('reasoning_tokens', 0) or 0
-
-            if pure_generation_time > 0:
-                speed = completion_tokens / pure_generation_time
-            else:
-                speed = 0.0
-
-            usage_dict['speed'] = f"{speed:.2f} token/s"
-            usage_dict['total_tokens'] = completion_tokens
-            usage_dict['reasoning_tokens'] = reasoning_tokens
-            yield f"\n<!--token_usage:{json.dumps(usage_dict)}-->"
+        if total_usage["completion_tokens"] > 0:
+            speed = total_usage["completion_tokens"] / pure_generation_time if pure_generation_time > 0 else 0.0
+            total_usage["speed"] = f"{speed:.2f} token/s"
+            yield f"\n<!--token_usage:{json.dumps(total_usage)}-->"

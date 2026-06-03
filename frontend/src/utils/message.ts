@@ -30,18 +30,18 @@ marked.use({
           level: 'inline',           // 规则作用范围为行内元素
           start(src) {
               // 查找单个波浪号的位置
-              return src.match(/~[^~]/)?.index;
+              return src.match(/~[^~]/)?.index
           },
           tokenizer(src, _tokens) {
               // 匹配被单个波浪号包裹的内容（非贪婪模式）
-              const match = src.match(/^~([^~]+)~/);
+              const match = src.match(/^~([^~]+)~/)
               if (match) {
                   // 若匹配成功，则返回一个普通的文本节点，保持原样
                   return {
                       type: 'text',
                       raw: match[0],
                       text: match[0],
-                  };
+                  }
               }
               return undefined; // 未匹配则返回 undefined，交由其他解析器处理
           },
@@ -117,113 +117,104 @@ export function processMessageContent(text: string, isStreaming = false): string
   }
 
   // 如果已经出现最终的工具调用块，则清除所有工具预览标记，避免同时显示两个块
-  if (processedText.includes('<!--tool_calls:start-->')) {
-    // 删除闭合的预览段
-    processedText = processedText.replace(
-      /<!--tool_preview:start:\S+?:.*?-->[\s\S]*?<!--tool_preview:end:\S+?:.*?-->/g,
-      ''
-    );
-    // 删除未闭合的预览段（start 之后直到文本末尾）
-    processedText = processedText.replace(
-      /<!--tool_preview:start:\S+?:.*?-->[\s\S]*$/g,
-      ''
-    );
-    // 清理可能残留的孤立 end 标记
-    processedText = processedText.replace(
-      /<!--tool_preview:end:\S+?:.*?-->/g,
-      ''
-    );
+  const hasToolCallsStart = processedText.includes('<!--tool_calls:start-->')
+  const hasToolCallsEnd   = processedText.includes('<!--tool_calls:end-->')
+  const shouldClearPreview = hasToolCallsStart && (!isStreaming || hasToolCallsEnd)
+
+  if (shouldClearPreview) {
+      // 删除闭合的预览段
+      processedText = processedText.replace(/<!--tool_preview:start:\S+?:.*?-->[\s\S]*?<!--tool_preview:end:\S+?:.*?-->/g, '')
+      // 删除未闭合的预览段
+      processedText = processedText.replace(/<!--tool_preview:start:\S+?:.*?-->[\s\S]*$/g, '')
+      // 清理残留 end
+      processedText = processedText.replace(/<!--tool_preview:end:\S+?:.*?-->/g, '')
   }
 
   // 仅在还没有最终工具调用块时，才渲染工具预览
   if (!processedText.includes('<!--tool_calls:start-->')) {
-    const startRegex = /<!--tool_preview:start:(\S+?):(.*?)-->/g;
-    const endRegex = /<!--tool_preview:end:(\S+?):.*?-->/g;
+    const startRegex = /<!--tool_preview:start:(\S+?):(.*?)-->/g
+    const endRegex = /<!--tool_preview:end:(\S+?):.*?-->/g
 
-    let firstStart = -1;
-    let lastEnd = -1;
-    let startMatch;
+    let firstStart = -1
+    let lastEnd = -1
+    let startMatch
 
     // 找到第一个 start
-    startRegex.lastIndex = 0;
+    startRegex.lastIndex = 0
     if ((startMatch = startRegex.exec(processedText)) !== null) {
-      firstStart = startMatch.index;
+      firstStart = startMatch.index
     }
 
     // 找到最后一个 end
-    let endMatch;
-    endRegex.lastIndex = 0;
+    let endMatch
+    endRegex.lastIndex = 0
     while ((endMatch = endRegex.exec(processedText)) !== null) {
-      lastEnd = endMatch.index + endMatch[0].length;
+      lastEnd = endMatch.index + endMatch[0].length
     }
 
     if (firstStart !== -1) {
-      const previewRegionEnd = lastEnd !== -1 ? lastEnd : processedText.length;
-      const previewRegion = processedText.substring(firstStart, previewRegionEnd);
+      const previewRegionEnd = lastEnd !== -1 ? lastEnd : processedText.length
+      const previewRegion = processedText.substring(firstStart, previewRegionEnd)
 
       // 重新扫描区域内所有 start / end，按 idx 分组
-      const idxSet = new Set<string>();
-      const startPositions: Array<{ idx: string; name: string; pos: number }> = [];
-      const endPositions: Array<{ idx: string; pos: number }> = [];
+      const idxSet = new Set<string>()
+      const startPositions: Array<{ idx: string; name: string; pos: number }> = []
+      const endPositions: Array<{ idx: string; pos: number }> = []
 
-      startRegex.lastIndex = 0;
-      let sMatch;
+      startRegex.lastIndex = 0
+      let sMatch
       while ((sMatch = startRegex.exec(previewRegion)) !== null) {
         startPositions.push({
           idx: sMatch[1],
           name: sMatch[2],
           pos: sMatch.index + sMatch[0].length
-        });
-        idxSet.add(sMatch[1]);
+        })
+        idxSet.add(sMatch[1])
       }
-      endRegex.lastIndex = 0;
-      let eMatch;
+      endRegex.lastIndex = 0
+      let eMatch
       while ((eMatch = endRegex.exec(previewRegion)) !== null) {
-        endPositions.push({ idx: eMatch[1], pos: eMatch.index });
+        endPositions.push({ idx: eMatch[1], pos: eMatch.index })
       }
 
       // 提取每个工具的参数文本
-      const cards: Array<{ name: string; args: string; streaming: boolean }> = [];
+      const cards: Array<{ name: string; args: string; streaming: boolean }> = []
       for (const idx of idxSet) {
-        const sItem = startPositions.find(s => s.idx === idx);
-        const eItem = endPositions.find(e => e.idx === idx);
-        const name = sItem?.name || '';
-        const startIdx = sItem?.pos ?? 0;
-        const endIdx = eItem?.pos ?? previewRegion.length;
-        const argsRaw = previewRegion.substring(startIdx, endIdx).trim();
-        cards.push({ name, args: argsRaw, streaming: !eItem });
+        const sItem = startPositions.find(s => s.idx === idx)
+        const eItem = endPositions.find(e => e.idx === idx)
+        const name = sItem?.name || ''
+        const startIdx = sItem?.pos ?? 0
+        const endIdx = eItem?.pos ?? previewRegion.length
+        const argsRaw = previewRegion.substring(startIdx, endIdx).trim()
+        cards.push({ name, args: argsRaw, streaming: !eItem })
       }
 
       // 生成卡片 HTML
-      let cardsHtml = '';
+      let cardsHtml = ''
       for (const card of cards) {
-        let formattedArgs = card.args;
+        let formattedArgs = card.args
         try {
-          const parsed = JSON.parse(formattedArgs);
-          formattedArgs = JSON.stringify(parsed, null, 2);
+          const parsed = JSON.parse(formattedArgs)
+          formattedArgs = JSON.stringify(parsed, null, 2)
         } catch {}
         cardsHtml += `<div class="tool-call-card streaming">
           <span class="tool-name">🛠 ${escapeHtml(card.name)}</span>
           <pre class="tool-args"><code>${escapeHtml(formattedArgs)}</code></pre>
-        </div>`;
+        </div>`
       }
 
-      const toolCount = cards.length;
-      const title =
-        toolCount > 0 ? `🔧 工具调用中… (${toolCount}个)` : '🔧 工具调用中…';
+      const toolCount = cards.length
+      const title = toolCount > 0 ? `🔧 工具调用中… (${toolCount}个)` : '🔧 工具调用中…'
       const blockHtml = `<div class="tool-calls-block" data-tool="open">
         <div class="tool-summary no-select">${title}</div>
         <div class="tool-calls-container">
           <div class="tool-inner">${cardsHtml}</div>
         </div>
-      </div>`;
+      </div>`
 
-      const key = `<!--BLOCK_${blockMap.size}-->`;
-      processedText =
-        processedText.substring(0, firstStart) +
-        key +
-        processedText.substring(previewRegionEnd);
-      blockMap.set(key, blockHtml);
+      const key = `<!--BLOCK_${blockMap.size}-->`
+      processedText = processedText.substring(0, firstStart) + key + processedText.substring(previewRegionEnd)
+      blockMap.set(key, blockHtml)
     }
   }
 

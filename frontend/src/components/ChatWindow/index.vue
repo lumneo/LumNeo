@@ -248,7 +248,7 @@
           <div class="compose-area" v-if="chatStore.activeChatId">
             <!-- ✅ 回到底部按钮 -->
             <transition name="fade">
-              <n-button v-if="!isAutoScrollEnabled" circle class="scroll-to-bottom-btn" @click="forceScrollToBottom">
+              <n-button v-if="!isAutoScrollEnabled && currentMessages.length !== 0" circle class="scroll-to-bottom-btn" @click="forceScrollToBottom">
                 <n-icon size="22"><ArrowDownOutline /></n-icon>
                 <div v-show="isLoading" class="rotate-circle"></div>
               </n-button>
@@ -426,10 +426,11 @@ const { showEditModal, editContent, copySvgName, copyContent,
   startEditMessage, saveEdit, renamingChatId, renameText, startRename, confirmRename 
 } = useMessageActions()
 
-const { addCopyButtons, addFileTypeClassToLinks, renderMermaidDiagrams, startObserving, stopObserving, setStreaming } = useCodeEnhancer(messageListRef)
+const virtualContainerRef = ref<HTMLElement | null>(null)   // 虚拟滚动容器（也是滚动元素）
+
+const { addCopyButtons, addFileTypeClassToLinks, renderMermaidDiagrams, startObserving, stopObserving, setStreaming } = useCodeEnhancer(virtualContainerRef)
 
 const currentMessages = computed(() => chatStore.currentChatMessages)
-const virtualContainerRef = ref<HTMLElement | null>(null)   // 虚拟滚动容器（也是滚动元素）
 const listItems = computed<any>(() => {
   const msgs = currentMessages.value as (Message | { __streaming: boolean })[]
   return isLoading.value ? [...msgs, { __streaming: true }] : msgs
@@ -725,8 +726,6 @@ function previewImage(imageUrl:string) {
   // 创建一个虚拟的 NImage 组件
   const vnode = h(NImage, {
     src: imageUrl,
-    // 可选：preview-src 如果大图不同
-    // previewSrc: largeImageUrl,
   })
 
   // 渲染到容器
@@ -871,8 +870,6 @@ watch(
       addFileTypeClassToLinks(virtualContainerRef.value!)
       // 如果处于自动滚动模式，则滚动到底部
       if (isAutoScrollEnabled.value) {
-        console.log("987896786");
-        
         scrollToBottom()
       }
     })
@@ -961,9 +958,21 @@ watch(
 )
 
 watch(() => chatStore.activeChatId, async (newId) => {
-    if (newId) {     
-      await chatStore.loadMessages(newId)      
+    if (newId) {
+      await chatStore.loadMessages(newId)
       showWelcome.value = currentMessages.value.length === 0
+      
+      // ⬇️ 等待虚拟滚动渲染完毕
+      await nextTick()
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      
+      if (!showWelcome.value) {
+        isAutoScrollEnabled.value = true
+        virtualizer.value.scrollToIndex(listItems.value.length - 1, { align: 'end' })
+        addCopyButtons()
+        renderMermaidDiagrams()
+        addFileTypeClassToLinks(virtualContainerRef.value!)
+      }
     } else {
       chatStore.loadChats()
     }

@@ -501,6 +501,9 @@ tr:last-child td:last-child {
   font-family: Consolas, '微软雅黑', monospace;
   margin: 6px 0 0;
 }
+.streaming .tool-args, .streaming .result-content {
+  max-height: none;
+}
 .tool-result {
   margin-top: 8px;
 }
@@ -684,10 +687,5 @@ tr:last-child td:last-child {
   /* 工具提示弹窗在小屏全宽 */
   .tools-popover-content {
     max-width: 80vw;
-  }
-  /* 思考块、工具调用容器等适当减少边距 */
-  .reasoning-block,
-  .tool-calls-container {
-    margin: 8px 0;
   }
 }
