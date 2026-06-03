@@ -4,7 +4,8 @@ import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 import { createSvgIconsPlugin } from 'vite-plugin-svg-icons'
 
-export default defineConfig({
+export default defineConfig(({mode}) => ({
+  base: mode === 'production' ? '/app/' : '/',
   plugins: [
     vue(),
     createSvgIconsPlugin({
@@ -34,4 +35,4 @@ export default defineConfig({
       }
     }
   }
-})
+}))

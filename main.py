@@ -110,7 +110,7 @@ async def proxy_generate(request: Request, file_path: str):
 app.mount("/files/uploads", StaticFiles(directory=config.uploads_dir), name="uploaded_files")
 
 if os.path.exists(config.static_dir):
-    app.mount("/", StaticFiles(directory=config.static_dir, html=True), name="static")
+    app.mount("/app", StaticFiles(directory=config.static_dir, html=True), name="static")
 
 
 # ============ 运行模式判断 ============
@@ -119,8 +119,8 @@ IS_FROZEN = getattr(sys, 'frozen', False)
 if IS_FROZEN:
     mimetypes.add_type("application/javascript", ".js")
     SERVER_PORT = 52025
-    FRONTEND_URL = f"http://127.0.0.1:{SERVER_PORT}"
-    DEBUG_MODE = False
+    FRONTEND_URL = f"http://127.0.0.1:{SERVER_PORT}/app/"
+    DEBUG_MODE = True
 else:
     SERVER_PORT = 8080
     FRONTEND_URL = "http://localhost:5173"
