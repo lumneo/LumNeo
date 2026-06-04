@@ -89,8 +89,6 @@ onMounted(() => {
 
 .sub-line {
   color: #e4e7ed;
-  font-size: 1rem;
-  line-height: 1.8;
   white-space: pre-wrap;
   word-break: break-word;
 }
