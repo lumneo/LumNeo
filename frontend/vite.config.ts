@@ -6,6 +6,18 @@ import { createSvgIconsPlugin } from 'vite-plugin-svg-icons'
 
 export default defineConfig(({mode}) => ({
   base: mode === 'production' ? '/app/' : '/',
+  build: {
+      // 文件分类打包
+      cssCodeSplit: true,
+      rollupOptions: {
+          output: {
+              manualChunks: undefined,
+              chunkFileNames: 'assets/js/[name]-[hash].js',
+              entryFileNames: 'assets/js/[name]-[hash].js',
+              assetFileNames: 'assets/[ext]/[name]-[hash].[ext]'
+          }
+      }
+  },
   plugins: [
     vue(),
     createSvgIconsPlugin({

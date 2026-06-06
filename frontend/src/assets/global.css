@@ -82,7 +82,7 @@ p{margin:0;padding:4px;}
   display: inline-block;
   width: 1.6em;
   height: 1.6em;
-  background: url('/pdf.svg') no-repeat center;
+  background: url('/svg/pdf.svg') no-repeat center;
   background-size: contain;
   margin-right: 0.3em;
   vertical-align: middle;
@@ -92,7 +92,7 @@ p{margin:0;padding:4px;}
   display: inline-block;
   width: 1.6em;
   height: 1.6em;
-  background: url('/word.svg') no-repeat center;
+  background: url('/svg/word.svg') no-repeat center;
   background-size: contain;
   margin-right: 0.3em;
   vertical-align: middle;
@@ -102,7 +102,7 @@ p{margin:0;padding:4px;}
   display: inline-block;
   width: 1.6em;
   height: 1.6em;
-  background: url('/excel.svg') no-repeat center;
+  background: url('/svg/excel.svg') no-repeat center;
   background-size: contain;
   margin-right: 0.3em;
   vertical-align: middle;
@@ -112,7 +112,7 @@ p{margin:0;padding:4px;}
   display: inline-block;
   width: 1.6em;
   height: 1.6em;
-  background: url('/ppt.svg') no-repeat center;
+  background: url('/svg/ppt.svg') no-repeat center;
   background-size: contain;
   margin-right: 0.3em;
   vertical-align: middle;
@@ -122,7 +122,7 @@ p{margin:0;padding:4px;}
   display: inline-block;
   width: 1.6em;
   height: 1.6em;
-  background: url('/text.svg') no-repeat center;
+  background: url('/svg/text.svg') no-repeat center;
   background-size: contain;
   margin-right: 0.3em;
   vertical-align: middle;
@@ -132,7 +132,7 @@ p{margin:0;padding:4px;}
   display: inline-block;
   width: 1.6em;
   height: 1.6em;
-  background: url('/zip.svg') no-repeat center;
+  background: url('/svg/zip.svg') no-repeat center;
   background-size: contain;
   margin-right: 0.3em;
   vertical-align: middle;
@@ -142,7 +142,7 @@ p{margin:0;padding:4px;}
   display: inline-block;
   width: 1.6em;
   height: 1.6em;
-  background: url('/image.svg') no-repeat center;
+  background: url('/svg/image.svg') no-repeat center;
   background-size: contain;
   margin-right: 0.3em;
   vertical-align: middle;
@@ -484,12 +484,12 @@ tr:last-child td:last-child {
   top: calc(50% - 0.6em);
   width: 1.2em;
   height: 1.2em;
-  mask-image: url('/thinking.svg');
+  mask-image: url('/svg/thinking.svg');
   mask-size: contain;
   mask-repeat: no-repeat;
   mask-position: center;
   background-color: #fff;
-  -webkit-mask-image: url('/thinking.svg');
+  -webkit-mask-image: url('/svg/thinking.svg');
   -webkit-mask-size: contain;
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
@@ -535,11 +535,11 @@ tr:last-child td:last-child {
   margin-right: 0.4em;
   vertical-align: text-bottom;
   background-color: currentColor;
-  mask-image: url('/tool.svg');
+  mask-image: url('/svg/tool.svg');
   mask-size: contain;
   mask-repeat: no-repeat;
   mask-position: center;
-  -webkit-mask-image: url('/tool.svg');
+  -webkit-mask-image: url('/svg/tool.svg');
   -webkit-mask-size: contain;
   -webkit-mask-repeat: no-repeat;
   -webkit-mask-position: center;
@@ -574,11 +574,11 @@ tr:last-child td:last-child {
   margin-right: 0.4em;
   vertical-align: text-bottom;
   background-color: currentColor; /* 颜色跟随文字 */
-  mask-image: url('/result.svg');
+  mask-image: url('/svg/result.svg');
   mask-size: contain;
   mask-repeat: no-repeat;
   mask-position: center;
-  -webkit-mask-image: url('/result.svg');
+  -webkit-mask-image: url('/svg/result.svg');
   -webkit-mask-size: contain;
 }
 
@@ -599,7 +599,7 @@ tr:last-child td:last-child {
   height: 1.5em;
   margin-right: 0.4em;
   vertical-align: text-bottom;
-  background-image: url('/speed.svg');
+  background-image: url('/svg/speed.svg');
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
@@ -612,7 +612,7 @@ tr:last-child td:last-child {
   height: 1.6em;
   margin-left: 0.8em;
   vertical-align: text-bottom;
-  background-image: url('/tokens.svg');
+  background-image: url('/svg/tokens.svg');
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
@@ -658,11 +658,11 @@ tr:last-child td:last-child {
   width: 1.2em;
   height: 1.2em;
   background-color: #fff;
-  mask-image: url('/tools.svg');
+  mask-image: url('/svg/tools.svg');
   mask-size: contain;
   mask-repeat: no-repeat;
   mask-position: center;
-  -webkit-mask-image: url('/tools.svg');
+  -webkit-mask-image: url('/svg/tools.svg');
   -webkit-mask-size: contain;
 }
 .tool-calls-block .tool-summary:hover {
