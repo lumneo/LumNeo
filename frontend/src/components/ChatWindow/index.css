@@ -210,6 +210,7 @@
   flex: 1;
   overflow-y: auto; /* 滚动条出现在这里 */
   scroll-behavior: auto;
+  overflow-anchor: none;
 }
 .streaming-after-item {
   width: 100%;

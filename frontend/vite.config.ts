@@ -3,7 +3,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 import { createSvgIconsPlugin } from 'vite-plugin-svg-icons'
-import monacoEditorPlugin from 'vite-plugin-monaco-editor-esm'
+// import monacoEditorPlugin from 'vite-plugin-monaco-editor-esm'
 
 export default defineConfig(({ mode }) => ({
   base: mode === 'production' ? '/app/' : '/',
@@ -64,9 +64,9 @@ export default defineConfig(({ mode }) => ({
       iconDirs: [path.resolve(process.cwd(), 'src/assets/icons')],
       symbolId: '[name]',
     }),
-    monacoEditorPlugin({
-      languageWorkers: ['editorWorkerService', 'typescript', 'css', 'html', 'json']
-    })
+    // monacoEditorPlugin({
+    //   languageWorkers: ['editorWorkerService', 'typescript', 'css', 'html', 'json']
+    // })
   ],
   resolve: {
     alias: {

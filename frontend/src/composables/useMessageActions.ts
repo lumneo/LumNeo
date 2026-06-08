@@ -117,7 +117,6 @@ export function useMessageActions() {
     }
 
     msg.content = finalContent
-    msg.renderedHtml = null
     await chatStore.editMessage(msg.id!, finalContent)
     showEditModal.value = false
 

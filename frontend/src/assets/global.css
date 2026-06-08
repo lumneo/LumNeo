@@ -283,6 +283,8 @@ pre code.hljs {
   height: auto;
 }
 
+.paragraph-node{margin:0!important;}
+
 /* ========== 现代表格 ========== */
 table {
   width: 100%;
@@ -333,11 +335,9 @@ tbody tr {
 }
 tbody tr:hover {
   background: rgba(99, 102, 241, 0.12)!important;
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.2);
 }
 [theme-mode="light"] tbody tr:hover {
   background: rgba(99, 102, 241, 0.04)!important;
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.1);
 }
 
 /* 斑马纹（柔和版） */
@@ -445,24 +445,13 @@ tr:last-child td:last-child {
     transform: translateY(-50%); /* 向上移动一半高度，让第二段顶上来 */
   }
 }
-.html-block-node .reasoning-summary:has(> .reasoning-summary) {
-  all: unset;
-  display: contents;
-}
-.html-block-node .reasoning-summary:has(> .reasoning-summary)::before {
-  display: none;
-  content: none;
-}
-.html-block-node .reasoning-summary:has(> .reasoning-summary)::after {
-  display: none;
-  content: none;
-}
 
 /* 思考块 */
 .reasoning-block {
   background: rgba(129, 78, 247, 0.06);
   border-radius: 6px;
   overflow: hidden;
+
 }
 .reasoning-block .reasoning-summary {
   font-weight: 600;
@@ -533,12 +522,12 @@ tr:last-child td:last-child {
 }
 
 /* 工具调用卡片 */
-.tool-calls-container {
+.toolcalls-container {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-.tool-call-card {
+.toolcall-card {
   background: rgba(59, 130, 246, 0.08);
   border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 8px;
@@ -639,22 +628,23 @@ tr:last-child td:last-child {
   background-position: center;
 }
 
-.tool-calls-block .tool-calls-block {
+.toolcalls-block {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: var(--bg-secondary);
   overflow: hidden;
 }
-.tool-calls-block .tool-summary {
+.toolcalls-block .toolcalls-summary {
   padding: 12px;
   font-weight: 600;
+  font-size: 1rem;
   cursor: pointer;
   color: var(--thinking-text);
   user-select: none;
   position: relative;
   padding-left: 60px;
 }
-.tool-summary::before {
+.toolcalls-summary::before {
   content: '';
   display: inline-block;
   width: 0;
@@ -670,7 +660,7 @@ tr:last-child td:last-child {
   left: 12px;
   top: calc(50% - 0.6em)
 }
-.tool-summary::after {
+.toolcalls-summary::after {
   content: '';
   position: absolute;
   left: 34px;
@@ -685,10 +675,10 @@ tr:last-child td:last-child {
   -webkit-mask-image: url('/svg/tools.svg');
   -webkit-mask-size: contain;
 }
-.tool-calls-block .tool-summary:hover {
+.toolcalls-block .toolcalls-summary:hover {
   background: rgba(99, 102, 241, 0.05);
 }
-.tool-calls-block .tool-calls-container {
+.toolcalls-block .toolcalls-container {
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 0.3s ease;
@@ -697,13 +687,13 @@ tr:last-child td:last-child {
 .tool-content {
   padding: 12px;
 }
-.tool-calls-container > .tool-inner {
+.toolcalls-container > .toolcalls-inner {
   min-height: 0;
 }
-.tool-calls-block[data-tool="open"] .tool-summary::before {
+.toolcalls-block[data-tool="open"] .toolcalls-summary::before {
   transform: rotate(90deg);
 }
-.tool-calls-block[data-tool="open"] .tool-calls-container {
+.toolcalls-block[data-tool="open"] .toolcalls-container {
   grid-template-rows: 1fr;
 }
 

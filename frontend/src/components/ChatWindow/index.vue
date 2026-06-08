@@ -2,10 +2,9 @@
   <n-config-provider :theme="naiveTheme" :theme-overrides="themeOverrides">
     <n-message-provider>
       <div class="app-container" :class="[configStore.themeMode]">
-        <div v-if="isMobile && sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false"></div> <!-- 遮罩层 -->
+        <div v-if="isMobile && sidebarOpen" class="sidebar-overlay" @click="sidebarCollapsed = true; sidebarOpen = false"></div>
         <!-- ========== 侧边栏（折叠式） ========== -->
         <aside v-show="!sidebarCollapsed" class="sidebar-panel border-marquee-right" :class="{ collapsed: sidebarCollapsed, 'sidebar-open': sidebarOpen }">
-          <!-- 展开状态 -->
           <div class="sidebar-header">
             <span class="logo-text"><m-svg name="star" style="position: absolute;left:120px;top:18px;"/>✨ LumNeo</span>
             <n-button v-if="!isMobile" text class="icon-btn" @click="sidebarCollapsed = true" title="收起侧栏">
@@ -28,7 +27,6 @@
                 @click="openChat(chat.id)"
                 :class="{ active: chat.id === chatStore.activeChatId }">
                 <div class="chat-item-row">
-                  <!-- 标题区域 -->
                   <div class="chat-title" v-if="renamingChatId !== chat.id">
                     {{ chat.title }}
                   </div>
@@ -40,8 +38,6 @@
                     @keydown.enter="confirmRename(chat.id)"
                     placeholder="请输入标题"
                   />
-
-                  <!-- 操作按钮（悬停显示） -->
                   <div class="chat-actions" v-if="renamingChatId !== chat.id">
                     <n-button text size="tiny" @click.stop="startRename(chat)" title="重命名">
                       <template #icon><n-icon :size="16"><m-svg name="edit"/></n-icon></template>
@@ -84,11 +80,9 @@
           @dragleave="onDragLeave"
           @drop="onDrop($event, chatStore.activeChatId, isLoading)"
         >
-          <!-- 拖拽提示浮层 -->
           <div v-if="isDragging && chatStore.activeChatId" class="drag-overlay">
             <div class="drag-hint"><n-icon><DocumentOutline /></n-icon> 释放文件以上传</div>
           </div>
-          <!-- 顶部工具栏 -->
           <header v-if="chatStore.activeChatId" class="top-bar" :class="[sidebarCollapsed || isMobile ? 'border-marquee-center' : '']">
             <n-flex style="width:100%" justify="space-between">
               <n-flex>
@@ -102,7 +96,6 @@
                     </n-icon>
                   </template>
                 </n-button>
-
                 <div class="model-badge">
                   <n-select
                     v-model:value="activeModelId"
@@ -114,7 +107,6 @@
                   />
                 </div>
                 <div class="toolbar-right">
-                  <!-- 角色选择 -->
                   <n-select
                     v-if="chatStore.enableProfile"
                     v-model:value="profileStore.activeProfileId"
@@ -158,21 +150,23 @@
               </div>
               <div ref="virtualContainerRef" class="virtual-scroller" @scroll="handleScroll">
                 <div
-                  :style="{height: virtualizer.getTotalSize() + 'px', width: isMobile? '90%' : '80%', maxWidth: '1000px', position: 'relative', margin: '0 auto'}">
+                  :style="{minHeight: virtualizer.getTotalSize() + 'px', width: isMobile? '90%' : '80%', maxWidth: '1000px', position: 'relative', margin: '0 auto'}">
                   <div
-                    v-for="virtualRow in virtualizer.getVirtualItems()"
-                    :key="<string>virtualRow.key"
-                    :ref="(el) => virtualizer.measureElement(<Element>el)"
-                    :style="{position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${virtualRow.start}px)`}"
+                    v-for="virtualRow in virtualItems"
+                    :key="virtualRow.key"
+                    :ref="measureElement"
                     :data-index="virtualRow.index"
+                    :style="{position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${virtualRow.start}px)`}"
                   >
                     <!-- 流式输出气泡（列表最后一项） -->
                     <template v-if="listItems[virtualRow.index]?.__streaming">
                       <div class="streaming-after-item message-row assistant">
                         <div v-if="streamingContent" class="bubble streaming">
                           <MarkdownRender
-                            custom-id="chat-streaming"
-                            :content="renderMessageRaw(streamingContent, true)"
+                            custom-id="chat"
+                            :is-dark="isDark"
+                            :code-block-props="{ theme: { light: 'vitesse-light', dark: 'vitesse-dark' } }"
+                            :content="processMessageContent(streamingContent, true)"
                             :final="false"
                             mode="chat"
                             smooth-streaming="auto"
@@ -180,6 +174,7 @@
                             :typewriter="true"
                             :max-live-nodes="0"
                             :batch-rendering="true"
+                            :custom-html-tags="['reasoning', 'toolcalls', 'toolpreview', 'tokenusage']"
                           />
                         </div>
                         <svgLoading v-else />
@@ -201,7 +196,6 @@
                             </div>
                           </div>
 
-                          <!-- 重新生成占位 -->
                           <template v-if="listItems[virtualRow.index] === regeneratingMsg">
                             <div style="height: 1px"></div>
                           </template>
@@ -213,11 +207,14 @@
                               <div class="message-content" @click="onContainerClick">
                                 <MarkdownRender
                                   custom-id="chat"
-                                  :content="listItems[virtualRow.index].renderedRaw || renderMessageRaw(listItems[virtualRow.index].content.trim(), false)"
+                                  :is-dark="isDark"
+                                  :code-block-props="{ theme: { light: 'vitesse-light', dark: 'vitesse-dark' } }"
+                                  :content="processMessageContent(listItems[virtualRow.index].content.trim(), false)"
                                   :final="true"
-                                  :fade="true"
+                                  :fade="false"
                                   :typewriter="false"
                                   :max-live-nodes="500"
+                                  :custom-html-tags="['reasoning', 'toolcalls', 'toolpreview', 'tokenusage']"
                                 />
                               </div>
                             </template>
@@ -265,7 +262,6 @@
 
           <!-- 底部输入区 -->
           <div class="compose-area" v-if="chatStore.activeChatId">
-            <!-- ✅ 回到底部按钮 -->
             <transition name="fade">
               <n-button v-if="!isAutoScrollEnabled && currentMessages.length !== 0" circle class="scroll-to-bottom-btn" @click="forceScrollToBottom">
                 <n-icon size="22"><ArrowDownOutline /></n-icon>
@@ -273,7 +269,6 @@
               </n-button>
             </transition>
             <div>
-              <!-- 文件预览条 -->
               <div v-if="uploadedFiles.length" class="file-preview-list">
                 <div v-for="(f, index) in uploadedFiles" :key="f.filename" class="file-preview-item">
                   <div class="file-info">
@@ -306,7 +301,7 @@
                 name="talk"
                 placeholder="今天要做点什么呢？"
                 :autosize="{ minRows: 4, maxRows: 6 }"
-                @keydown.enter.exact="onSendMessage"
+                @keydown.enter.exact.prevent="onSendMessage"
                 :disabled="isLoading || !chatStore.activeChatId || !activeModelId"
                 class="compose-input"
                 :class="{ 'jelly-effect': isJellyActive }"
@@ -314,7 +309,6 @@
                 @paste="onPaste"
               />
             </div>
-
             <div class="compose-tools-tar">
               <n-button v-if="configStore.activeModel?.type === 'online'" 
               round 
@@ -326,7 +320,6 @@
               >
                 深度思考
               </n-button>
-              <!-- 文件上传按钮 -->
               <n-upload
                 :disabled="isLoading || !chatStore.activeChatId || !activeModelId"
                 v-model:file-list="uploadFileList"
@@ -341,8 +334,6 @@
                   <template #icon><n-icon><m-svg name="attach" /></n-icon></template>
                 </n-button>
               </n-upload>
-
-              <!-- 发送按钮 -->
               <n-button v-if="!isLoading" class="send-btn" @click="onSendMessage"
                 strong secondary type="primary"
                 :disabled="!!(!currentInput.trim().length && chatStore.activeChatId)"
@@ -362,10 +353,7 @@
         </main>
       </div>
 
-      <!-- 设置抽屉 -->
       <SettingsDrawer v-model:show="showSettings" />
-
-      <!-- 编辑消息模态框 -->
       <n-modal v-model:show="showEditModal" preset="dialog" draggable :mask-closable="false" title="编辑消息" positive-text="保存" negative-text="取消"
         @positive-click="onSaveEdit">
         <n-input v-model:value="editContent" type="textarea" :autosize="{ minRows: 2, maxRows: 10 }" placeholder="请输入内容"/>
@@ -403,7 +391,28 @@ import { useFileUpload } from '@/composables/useFileUpload'
 import { useChat } from '@/composables/useChat'
 import { useMessageActions } from '@/composables/useMessageActions'
 import { useCodeEnhancer } from '@/composables/useCodeEnhancer'
-import { localIP, renderMessageRaw, normalizeFileRef } from '@/utils/message'
+import { localIP, processMessageContent, normalizeFileRef } from '@/utils/message'
+
+// ===== markstream-vue 自定义标签注册 =====
+import { setCustomComponents, removeCustomComponents, getCustomNodeComponents } from 'markstream-vue'
+import ReasoningNode from '@/components/ReasoningNode.vue'
+import ToolCallsNode from '@/components/ToolCallsNode.vue'
+import ToolPreviewNode from '@/components/ToolPreviewNode.vue'
+import TokenUsageNode from '@/components/TokenUsageNode.vue'
+
+// 调试：检查注册状态
+console.log('[markstream-vue] Before registration:', getCustomNodeComponents('chat'))
+
+// 注册自定义组件（使用静态 ID 'chat'，与 MarkdownRender 的 custom-id 匹配）
+setCustomComponents('chat', {
+  reasoning: ReasoningNode,
+  toolcalls: ToolCallsNode,      // 注意：标签名不能包含下划线，使用小写
+  toolpreview: ToolPreviewNode,  // 注意：标签名不能包含下划线，使用小写
+  tokenusage: TokenUsageNode,    // 注意：标签名不能包含下划线，使用小写
+})
+
+// 调试：确认注册成功
+console.log('[markstream-vue] After registration:', getCustomNodeComponents('chat'))
 
 const route = useRoute()
 const router = useRouter()
@@ -417,12 +426,14 @@ const qrCodeUrl = ref('')
 const local_ip = ref('')
 const showQRCode = ref(true)
 
-const isAutoScrollEnabled = ref(true)            // 自动滚动开关
-const SCROLL_THRESHOLD = 80                     // 距离底部的容差阈值（像素）
+const isAutoScrollEnabled = ref(true)
+const SCROLL_THRESHOLD = 180
+
+const isDark = computed(() => configStore.themeMode === 'dark')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
-  if (!isMobile.value) sidebarOpen.value = false // 桌面端关闭移动菜单
+  if (!isMobile.value) sidebarOpen.value = false
   showQRCode.value = !(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && 'ontouchstart' in window || navigator.maxTouchPoints > 0)
 }
 
@@ -444,9 +455,9 @@ const { showEditModal, editContent, copySvgName, copyContent,
   startEditMessage, saveEdit, renamingChatId, renameText, startRename, confirmRename 
 } = useMessageActions()
 
-const virtualContainerRef = ref<HTMLElement | null>(null)   // 虚拟滚动容器（也是滚动元素）
+const virtualContainerRef = ref<HTMLElement | null>(null)
 
-const { addCopyButtons, addFileTypeClassToLinks, renderMermaidDiagrams, startObserving, stopObserving, setStreaming } = useCodeEnhancer(virtualContainerRef)
+const { addFileTypeClassToLinks, startObserving, stopObserving, setStreaming } = useCodeEnhancer(virtualContainerRef)
 
 const currentMessages = computed(() => chatStore.currentChatMessages)
 const listItems = computed<any>(() => {
@@ -454,47 +465,59 @@ const listItems = computed<any>(() => {
   return isLoading.value ? [...msgs, { __streaming: true }] : msgs
 })
 
+const virtualItems = computed(() => virtualizer.value?.getVirtualItems() ?? [])
+
+const measureElement = (el: Element | null) => {
+  if (el) {
+    virtualizer.value?.measureElement(el)
+  }
+}
+
 const virtualizer = useVirtualizer(
   computed(() => ({
     count: listItems.value.length,
     getScrollElement: () => virtualContainerRef.value,
-    estimateSize: () => 120,            // 初始估算高度，后续自动测量
-    overscan: 5,
+    getItemKey: (index) => {
+      const msg = listItems.value[index]
+      if (!msg) return `fallback-${index}`
+      return msg.__streaming ? `streaming-${index}` : `msg-${msg.id || index}`
+    },
+    estimateSize: (index) => {
+      const msg = listItems.value[index]
+      if (!msg) return 100
+      if (msg.__streaming) return 80
+
+      if (msg.role === 'user') {
+        const len = msg.content?.length || 0
+        return Math.min(80 + Math.floor(len / 30) * 24, 300)
+      }
+
+      const len = msg.content?.length || 0
+      return Math.max(200, Math.min(len * 1.2, 5000))
+    },
+    overscan: 15,
+    measureElement: (el) => el.getBoundingClientRect().height,
   }))
 )
 
-// 绑定缓存逻辑：当流结束时，计算 HTML 并写入当前最新的历史消息中
 onStreamEnd.value = (fullText: string) => {
-  // 获取当前对话的最新一条助手消息（也就是刚刚生成的这条）
   const messages = chatStore.getActiveMessages()
 
-  // 如果是重新生成，更新正在重新生成的那条消息
   if (regeneratingMsg.value) {
     const msg = regeneratingMsg.value
     msg.content = fullText
-    msg.renderedRaw = renderMessageRaw(fullText, true)  // 缓存渲染结果
-    regeneratingMsg.value = null   // 清空标记，恢复成普通消息显示
-    nextTick(async () => {
+    regeneratingMsg.value = null
+    nextTick(() => {
       setStreaming(false)
-      addCopyButtons()
-      await renderMermaidDiagrams()
       addFileTypeClassToLinks(virtualContainerRef.value!)
-      nextTick(() => virtualizer.value?.measure())
     })
     return
   }
 
   const lastMsg = messages[messages.length - 1]
   if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === fullText) {
-    // 如果还没有缓存，就进行一次性完整渲染并存入
-    if (!lastMsg.renderedHtml) {
-      lastMsg.renderedHtml = renderMessageRaw(fullText, true)
-    }
-    nextTick(async () => {
-      addCopyButtons()
-      await renderMermaidDiagrams()
+    nextTick(() => {
       addFileTypeClassToLinks(virtualContainerRef.value!)
-      virtualizer.value?.measure()
     })
   }
 }
@@ -507,20 +530,15 @@ watch(() => selected.value, (newVal) => {
   localStorage.setItem('thinking', newVal ? 'true' : 'false')
 })
 
-// ---------- 侧边栏折叠 ----------
 const sidebarCollapsed = ref(true)
-
-// ---------- 设置抽屉 ----------
 const showSettings = ref(false)
 
-// ---------- 角色选项 ----------
 const profileOptions = computed(() =>
   profileStore.profiles.map((p) => ({ label: p.name, value: p.id }))
 )
 
 const isProgrammaticScroll = ref(false)
 
-// ---------- 滚动到底部 ----------
 function scrollToBottom() {
   if (listItems.value.length === 0) return
   isProgrammaticScroll.value = true
@@ -558,65 +576,49 @@ function setQRCodeUrl () {
   qrCodeUrl.value = window.location.href.replace(/\b(?:localhost|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g, local_ip.value)
 }
 
-// ========== 粘贴上传相关 ==========
 const pasteToastVisible = ref(false)
 const lastPasteCount = ref(0)
 let pasteToastTimer: ReturnType<typeof setTimeout> | null = null
 
-/**
- * 检查文件类型是否在 fileConfig.accept 允许范围内
- * @param fileType MIME 类型，如 "image/png"
- * @param fileName 文件名（用于扩展名匹配）
- */
 function isFileTypeAccepted(fileType: string, fileName: string): boolean {
   const accept = fileConfig.accept
-  // 空 accept 或通配符表示接受所有
   if (!accept || accept === '*' || accept === '*/*') return true
-  
+
   const acceptItems = accept.split(',').map(s => s.trim()).filter(Boolean)
   if (acceptItems.length === 0) return true
-  
+
   for (const item of acceptItems) {
-    // 匹配 MIME 类型通配符，如 image/*
     if (item.endsWith('/*')) {
-      const prefix = item.slice(0, -1) // "image/"
+      const prefix = item.slice(0, -1)
       if (fileType.startsWith(prefix)) return true
       continue
     }
-    // 匹配扩展名，如 .pdf .doc
     if (item.startsWith('.')) {
       const ext = item.toLowerCase()
       if (fileName.toLowerCase().endsWith(ext)) return true
-      // 也尝试从 MIME 类型推断扩展名
       const mimeExt = fileType.split('/')[1]
       if (mimeExt && ext === '.' + mimeExt.toLowerCase()) return true
       continue
     }
-    // 精确 MIME 类型匹配
     if (fileType === item) return true
   }
   return false
 }
 
-/**
- * 粘贴事件处理 - 支持 Ctrl+V 粘贴剪贴板中的文件/图片
- */
 function onPaste(e: ClipboardEvent) {
-  // 检查上传条件
   if (!chatStore.activeChatId) return
   if (isLoading.value) return
   if (!activeModelId.value) return
-  
+
   const clipboardData = e.clipboardData
   if (!clipboardData) return
-  
+
   const items = clipboardData.items
   if (!items || items.length === 0) return
-  
-  // 收集剪贴板中的文件
+
   const pastedFiles: File[] = []
   let hasOnlyText = true
-  
+
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
     if (item.kind === 'file') {
@@ -627,47 +629,36 @@ function onPaste(e: ClipboardEvent) {
       }
     }
   }
-  
-  // 如果没有文件，只有纯文本，不拦截（让输入框正常处理文本粘贴）
+
   if (pastedFiles.length === 0) return
-  
-  // 过滤不符合 accept 条件的文件
+
   const acceptedFiles = pastedFiles.filter(f => isFileTypeAccepted(f.type, f.name))
   if (acceptedFiles.length === 0) return
-  
-  // 阻止默认行为（防止图片以 base64 等形式插入到输入框）
+
   e.preventDefault()
-  
-  // 计算还能添加多少个文件
+
   const remaining = fileConfig.max - uploadedFiles.value.length
-  if (remaining <= 0) {
-    // 已达上限，静默忽略
-    return
-  }
-  
-  // 截断到剩余可添加数量
+  if (remaining <= 0) return
+
   const filesToAdd = acceptedFiles.slice(0, remaining)
-  
-  // 为每个粘贴的文件创建上传对象并添加到 uploadedFiles
+
   for (const file of filesToAdd) {
-    // 为没有合适文件名的粘贴文件生成名称（如截图粘贴）
     let filename = file.name
     if (!filename || filename === 'image.png' || filename === 'blob' || filename === 'clipboard') {
       const ext = file.type ? file.type.split('/')[1] || 'png' : 'png'
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
       filename = `paste-${timestamp}-${Math.random().toString(36).slice(2, 6)}.${ext}`
     }
-    
+
     const url = URL.createObjectURL(file)
-    
+
     uploadedFiles.value.push({
       filename,
       type: file.type || 'application/octet-stream',
       url
     })
   }
-  
-  // 显示粘贴成功提示
+
   lastPasteCount.value = filesToAdd.length
   pasteToastVisible.value = true
   if (pasteToastTimer) clearTimeout(pasteToastTimer)
@@ -676,7 +667,6 @@ function onPaste(e: ClipboardEvent) {
   }, 1800)
 }
 
-// ---------- 导航 ----------
 function openChat(chatId: string) {
   if (isLoading.value) stopGeneration()
   chatStore.activeChatId = chatId  
@@ -686,7 +676,6 @@ function openChat(chatId: string) {
   }, 300)
 }
 
-// ---------- 发送消息包装 ----------
 function onSendMessage() {
   isAutoScrollEnabled.value = true
   sendMessage(uploadedFiles.value, () => {
@@ -697,7 +686,6 @@ function onSendMessage() {
   clearFiles()
 }
 
-// ---------- 编辑后重新生成包装 ----------
 async function onRegenerateFromCurrentHistory() {
   isAutoScrollEnabled.value = true
   await regenerateFromCurrentHistory(() => {
@@ -721,31 +709,22 @@ async function onSaveEdit() {
   requestAnimationFrame(() => virtualizer.value?.measure())
 }
 
-/**
- * 使用 Naive UI 的预览功能打开一张图片
- * @param imageUrl 图片地址
- */
 function previewImage(imageUrl:string) {
-  // 创建一个隐藏的容器
   const container = document.createElement('div')
   container.style.display = 'none'
   document.body.appendChild(container)
 
-  // 创建一个虚拟的 NImage 组件
   const vnode = h(NImage, {
     src: imageUrl,
   })
 
-  // 渲染到容器
   render(vnode, container)
 
-  // 等待 DOM 更新后，找到里面的 img 并触发点击
   nextTick(() => {
     const imgEl = container.querySelector('img')
     if (imgEl) {
-      imgEl.click()  // 触发 NImage 内置的预览行为
+      imgEl.click()
     }
-    // 预览打开后延迟移除临时容器（避免干扰）
     setTimeout(() => {
       document.body.removeChild(container)
     }, 200)
@@ -756,194 +735,57 @@ const onContainerClick = (e: any) => {
   const target = e.target
   if (target.tagName === 'IMG') {
     e.preventDefault()
-    previewImage(target.src)   // 你的预览函数
+    previewImage(target.src)
   }
 }
 
-// 强制滚动到底部并开启自动滚动
 function forceScrollToBottom() {
   isAutoScrollEnabled.value = true
   virtualizer.value.scrollToIndex(listItems.value.length - 1, { align: 'end' })
 }
 
-
-function handleReasoningClick(e: MouseEvent) {
-  const target = e.target as HTMLElement
-  const summary = target.closest('.reasoning-summary')
-  if (!summary) return
-  
-  const block = summary.closest('.reasoning-block') as HTMLElement | null
-  if (!block) return
-  
-  const isOpen = block.dataset.reasoning === 'open'
-  const container = block.closest('.message-content')
-  let blockIndex = -1
-  if (container) {
-    const blocks = Array.from(container.querySelectorAll('.reasoning-block'))
-    blockIndex = blocks.indexOf(block)
-  }
-  
-  // 先切换 DOM 状态（即时反馈）
-  if (isOpen) {
-    block.removeAttribute('data-reasoning')
-  } else {
-    block.setAttribute('data-reasoning', 'open')
-  }
-
-  // 同步更新缓存，防止虚拟滚动回收后状态丢失
-  if (blockIndex !== -1) {
-    const scrollerItem = target.closest('[data-index]')
-    if (scrollerItem) {
-      const idx = parseInt(scrollerItem.getAttribute('data-index') || '0', 10)
-      const msg = chatStore.currentChatMessages[idx]
-      if (msg) {
-        let raw = msg.renderedRaw || renderMessageRaw(msg.content.trim(), false)
-        const parts = raw.split('<div class="reasoning-block"')
-        if (blockIndex >= 0 && blockIndex + 1 < parts.length) {
-          let part = parts[blockIndex + 1]
-          if (isOpen) {
-            part = part.replace(/^ data-reasoning="open">/, '>')
-          } else {
-            part = part.replace(/^>/, ' data-reasoning="open">')
-          }
-          parts[blockIndex + 1] = part
-          msg.renderedRaw = parts.join('<div class="reasoning-block"')
-          requestAnimationFrame(() => {
-            updateScrollState()
-          })
-        }
-      }
-    }
-  }
-}
-
-function handleToolClick(e: MouseEvent) {
-  const target = e.target as HTMLElement
-  const summary = target.closest('.tool-summary')
-  if (!summary) return
-  
-  const block = summary.closest('.tool-calls-block') as HTMLElement | null
-  if (!block) return
-  
-  const isOpen = block.dataset.tool === 'open'
-  const container = block.closest('.message-content')
-  let blockIndex = -1
-  if (container) {
-    const blocks = Array.from(container.querySelectorAll('.tool-calls-block'))
-    blockIndex = blocks.indexOf(block)
-  }
-
-  if (isOpen) {
-    block.removeAttribute('data-tool')
-  } else {
-    block.setAttribute('data-tool', 'open')
-  }
-  
-  if (blockIndex !== -1) {
-    const scrollerItem = target.closest('[data-index]')
-    if (scrollerItem) {
-      const idx = parseInt(scrollerItem.getAttribute('data-index') || '0', 10)
-      const msg = chatStore.currentChatMessages[idx]
-      if (msg) {
-        let raw = msg.renderedRaw || renderMessageRaw(msg.content.trim(), false)
-        const parts = raw.split('<div class="tool-calls-block"')
-        if (blockIndex >= 0 && blockIndex + 1 < parts.length) {
-          let part = parts[blockIndex + 1]
-          if (isOpen) {
-            part = part.replace(/^ data-tool="open">/, '>')
-          } else {
-            part = part.replace(/^>/, ' data-tool="open">')
-          }
-          parts[blockIndex + 1] = part
-          msg.renderedRaw = parts.join('<div class="tool-calls-block"')
-          requestAnimationFrame(() => {
-            updateScrollState()
-          })
-        }
-      }
-    }
-  }
-}
-
-// ---------- 监视消息变化以重新渲染增强内容 ----------
-watch(
-  () => chatStore.currentChatMessages.length,
-  () => {
-    // 确保 DOM 更新后再渲染图表和按钮
-    nextTick(async () => {
-      addCopyButtons()
-      await renderMermaidDiagrams()
-      addFileTypeClassToLinks(virtualContainerRef.value!)
-      // 如果处于自动滚动模式，则滚动到底部
-      if (isAutoScrollEnabled.value) {
-        scrollToBottom()
-      }
-    })
-  }
-)
-
-// 果冻动画控制
 const isJellyActive = ref(false)
 let jellyTimer: ReturnType<typeof setTimeout> | null = null
 
 function triggerJelly() {
-  if (isJellyActive.value) return   // 避免动画叠加
+  if (isJellyActive.value) return
   isJellyActive.value = true
   if (jellyTimer) clearTimeout(jellyTimer)
   jellyTimer = setTimeout(() => {
     isJellyActive.value = false
-  }, 600)   // 与动画时长匹配
+  }, 600)
 }
-
-// 用于清理事件监听的函数
-let cleanupListeners: (() => void) | null = null
-
-watch(virtualContainerRef, async (el) => {  
-  // 清理旧的监听
-  if (cleanupListeners) {
-    cleanupListeners()
-    cleanupListeners = null
-  }
-  if (el) {
-    // 绑定事件
-    el.addEventListener('click', handleReasoningClick)
-    el.addEventListener('click', handleToolClick)
-    cleanupListeners = () => {
-      el.removeEventListener('click', handleReasoningClick)
-      el.removeEventListener('click', handleToolClick)
-    }
-    // 容器出现后强制测量一次（确保初始高度正确）
-    await nextTick()
-    virtualizer.value?.measure()
-    addCopyButtons()
-  }
-}, { immediate: true })
 
 const isRender = ref(false)
 
-// ---------- 生命周期 ----------
 onMounted(async () => {
   checkMobile()
-  window.addEventListener('resize', checkMobile)
+  let resizeTimer: ReturnType<typeof setTimeout>
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer)
+    resizeTimer = setTimeout(checkMobile, 150)
+  })
   await profileStore.loadProfiles()
-  await renderMermaidDiagrams()
   startObserving()
   fetch('/api/local-ip').then(async (res) => {
     local_ip.value = await res.json()
     localIP.value = local_ip.value
     setQRCodeUrl()
   })
-  
+
   setTimeout(() => {
-    addFileTypeClassToLinks(virtualContainerRef.value!)
     isRender.value = true
   }, 150)
 })
 
 onUnmounted(() => {
   if (jellyTimer) clearTimeout(jellyTimer)
+  if (pasteToastTimer) clearTimeout(pasteToastTimer)
   window.removeEventListener('resize', checkMobile)
   stopObserving()
+
+  // 清理 markstream-vue 自定义组件注册
+  removeCustomComponents('chat')
 })
 
 const showWelcome = ref(false)
@@ -953,37 +795,35 @@ watch(() => route.params.id, (newId) => {
   chatStore.activeChatId = newId as string
 })
 
-watch(
-  () => currentMessages.value.length,
-  () => {
-    nextTick(() => {
-      virtualizer.value?.measure()
-      addCopyButtons()
-    })
-  }
-)
-
 watch(() => chatStore.activeChatId, async (newId) => {
     if (newId) {
       await chatStore.loadMessages(newId)
       showWelcome.value = currentMessages.value.length === 0
-      
-      // ⬇️ 等待虚拟滚动渲染完毕
+
       await nextTick()
       await new Promise(resolve => requestAnimationFrame(resolve))
-      
+
       if (!showWelcome.value) {
         isAutoScrollEnabled.value = true
         virtualizer.value.scrollToIndex(listItems.value.length - 1, { align: 'end' })
-        addCopyButtons()
-        await renderMermaidDiagrams()
-        addFileTypeClassToLinks(virtualContainerRef.value!)
       }
     } else {
       chatStore.loadChats()
     }
   },
   { immediate: true }
+)
+
+watch(
+  () => chatStore.currentChatMessages.length,
+  () => {
+    nextTick(async () => {
+      addFileTypeClassToLinks(virtualContainerRef.value!)
+      if (isAutoScrollEnabled.value) {
+        scrollToBottom()
+      }
+    })
+  }
 )
 </script>
 

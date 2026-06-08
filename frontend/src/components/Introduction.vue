@@ -1,13 +1,22 @@
-<template>
-  <div class="intro-card" :class="{'animate' : isAnimate}">
+<<template>
+  <div class="intro-card" :class="{ animate: isAnimate }">
     <div class="typewriter-container">
       <div class="typewriter-line">
         <span class="gradient-text">✨ LumNeo</span>
       </div>
       <div class="typewriter-line">
-        <!-- 打字中显示纯文本，结束后显示渲染后的 Markdown -->
-        <div v-if="isTyping" class="sub-line">{{ displayedText }}<span class="cursor">|</span></div>
-        <div v-else class="sub-line rendered" v-html="renderedHtml"></div>
+        <MarkdownRender
+          custom-id="intro"
+          :content="fullText"
+          :final="final"
+          :typewriter="true"
+          :fade="true"
+          :smooth-streaming="true"
+          :max-live-nodes="0"
+          :batch-rendering="true"
+          :render-batch-size="12"
+          :render-batch-delay="8"
+        />
       </div>
     </div>
   </div>
@@ -15,7 +24,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { marked } from 'marked'
+import MarkdownRender from 'markstream-vue'
 
 const fullText = `
 *—— 不是冰冷的工具，是点亮你灵感的那束光*
@@ -37,28 +46,16 @@ const fullText = `
 **LumNeo —— 你的全能本地灵感引擎**
 ✨ 点击这里，开始你的专属对话`
 
-const displayedText = ref('')
-const isTyping = ref(true)
-const renderedHtml = ref()
+const final = ref(false)
 const isAnimate = ref(false)
 
-let index = 0
-
 onMounted(() => {
-  const timer = setInterval(() => {
-    if (index < fullText.length) {
-      displayedText.value += fullText.charAt(index)
-      index++
-    } else {
-      clearInterval(timer)
-      // 打字结束，用 marked 渲染最终文本
-      renderedHtml.value = marked.parse(fullText)
-      isTyping.value = false
-      setTimeout(() => {
-        isAnimate.value = true
-      }, 260)
-    }
-  }, 50)
+  setTimeout(() => {
+    final.value = true
+    setTimeout(() => {
+      isAnimate.value = true
+    }, 260)
+  }, 2600)
 })
 </script>
 
@@ -73,10 +70,11 @@ onMounted(() => {
   cursor: pointer;
   font-family: 'Inter', system-ui, sans-serif;
 }
-.animate {
-  animation: jelly-pop 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55), breathe 1.6s ease-in-out infinite;
-}
 
+.animate {
+  animation: jelly-pop 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55),
+    breathe 1.6s ease-in-out infinite;
+}
 
 .gradient-text {
   font-size: 2rem;
@@ -87,33 +85,21 @@ onMounted(() => {
   background-clip: text;
 }
 
-.sub-line {
-  color: #e4e7ed;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.rendered :deep(h1),
-.rendered :deep(h2),
-.rendered :deep(h3) {
-  color: #a78bfa;
-  margin-top: 1em;
-}
-
-.rendered :deep(strong) {
-  color: #fbbf24;
-  font-weight: 600;
-}
-
-.cursor {
-  color: #fbbf24;
-  font-weight: 200;
-  animation: blink 1s step-end infinite;
+/* 打字机光标样式 */
+:deep(.typewriter-cursor) {
+  color: #fbbf24 !important;
+  font-weight: 200 !important;
+  animation: blink 1s step-end infinite !important;
 }
 
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 @keyframes jelly-pop {
@@ -133,15 +119,16 @@ onMounted(() => {
     opacity: 1;
   }
 }
+
 @keyframes breathe {
   0% {
-    box-shadow: 0 0 4px rgba(216, 201, 252, 0.4);
+    box-shadow: 0 0 2px rgba(149, 193, 223, 0.6);
   }
   50% {
-    box-shadow: 0 0 24px 6px #917aec; /* 亮紫色，无透明度更亮 */
+    box-shadow: 0 0 24px 6px #7f86be;
   }
   100% {
-    box-shadow: 0 0 4px rgba(216, 201, 252, 0.4);
+    box-shadow: 0 0 2px rgba(149, 193, 223, 0.8);
   }
 }
 </style>
