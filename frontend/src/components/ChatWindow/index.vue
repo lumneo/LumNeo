@@ -153,8 +153,8 @@
                   :style="{minHeight: virtualizer.getTotalSize() + 'px', width: isMobile? '90%' : '80%', maxWidth: '1000px', position: 'relative', margin: '0 auto'}">
                   <div
                     v-for="virtualRow in virtualItems"
-                    :key="virtualRow.key"
-                    :ref="measureElement"
+                    :key="<string>virtualRow.key"
+                    :ref="<any>measureElement"
                     :data-index="virtualRow.index"
                     :style="{position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${virtualRow.start}px)`}"
                   >
@@ -165,13 +165,16 @@
                           <MarkdownRender
                             custom-id="chat"
                             :is-dark="isDark"
-                            :code-block-props="{ theme: { light: 'vitesse-light', dark: 'vitesse-dark' } }"
+                            :code-block-props="{ showExpandButton: false, showCollapseButton: false, }"
+                            :themes="['vitesse-dark', 'vitesse-light']"
+                            code-block-dark-theme="vitesse-dark"
+                            code-block-light-theme="vitesse-light"
                             :content="processMessageContent(streamingContent, true)"
                             :final="false"
                             mode="chat"
                             smooth-streaming="auto"
                             :fade="false"
-                            :typewriter="true"
+                            :typewriter="false"
                             :max-live-nodes="0"
                             :batch-rendering="true"
                             :custom-html-tags="['reasoning', 'toolcalls', 'toolpreview', 'tokenusage']"
@@ -204,11 +207,14 @@
                               <div class="message-content user-content" v-text="listItems[virtualRow.index].content.trim()"></div>
                             </template>
                             <template v-else>
-                              <div class="message-content" @click="onContainerClick">
+                              <div class="message-content">
                                 <MarkdownRender
                                   custom-id="chat"
                                   :is-dark="isDark"
-                                  :code-block-props="{ theme: { light: 'vitesse-light', dark: 'vitesse-dark' } }"
+                                  :code-block-props="{ showExpandButton: false, showCollapseButton: false, }"
+                                  :themes="['vitesse-dark', 'vitesse-light']"
+                                  code-block-dark-theme="vitesse-dark"
+                                  code-block-light-theme="vitesse-light"
                                   :content="processMessageContent(listItems[virtualRow.index].content.trim(), false)"
                                   :final="true"
                                   :fade="false"
@@ -363,7 +369,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, h, render, nextTick, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NConfigProvider, NMessageProvider, NButton, NInput,
   NUpload, NList, NListItem, NIcon, NScrollbar, NImage, NFlex,
@@ -390,29 +396,27 @@ import { useModel } from '@/composables/useModel'
 import { useFileUpload } from '@/composables/useFileUpload'
 import { useChat } from '@/composables/useChat'
 import { useMessageActions } from '@/composables/useMessageActions'
-import { useCodeEnhancer } from '@/composables/useCodeEnhancer'
 import { localIP, processMessageContent, normalizeFileRef } from '@/utils/message'
 
 // ===== markstream-vue 自定义标签注册 =====
-import { setCustomComponents, removeCustomComponents, getCustomNodeComponents } from 'markstream-vue'
-import ReasoningNode from '@/components/ReasoningNode.vue'
-import ToolCallsNode from '@/components/ToolCallsNode.vue'
-import ToolPreviewNode from '@/components/ToolPreviewNode.vue'
-import TokenUsageNode from '@/components/TokenUsageNode.vue'
+import { setCustomComponents, removeCustomComponents } from 'markstream-vue'
+import ReasoningNode from '@/components/CustomNodes/ReasoningNode.vue'
+import ToolCallsNode from '@/components/CustomNodes/ToolCallsNode.vue'
+import ToolPreviewNode from '@/components/CustomNodes/ToolPreviewNode.vue'
+import TokenUsageNode from '@/components/CustomNodes/TokenUsageNode.vue'
+import ImageNode from '@/components/CustomNodes/ImageNode.vue'
+import LinkNode from '@/components/CustomNodes/LinkNode.vue'
 
-// 调试：检查注册状态
-console.log('[markstream-vue] Before registration:', getCustomNodeComponents('chat'))
 
 // 注册自定义组件（使用静态 ID 'chat'，与 MarkdownRender 的 custom-id 匹配）
 setCustomComponents('chat', {
   reasoning: ReasoningNode,
-  toolcalls: ToolCallsNode,      // 注意：标签名不能包含下划线，使用小写
-  toolpreview: ToolPreviewNode,  // 注意：标签名不能包含下划线，使用小写
-  tokenusage: TokenUsageNode,    // 注意：标签名不能包含下划线，使用小写
+  toolcalls: ToolCallsNode,    
+  toolpreview: ToolPreviewNode,
+  tokenusage: TokenUsageNode,  
+  image: ImageNode,
+  link: LinkNode,
 })
-
-// 调试：确认注册成功
-console.log('[markstream-vue] After registration:', getCustomNodeComponents('chat'))
 
 const route = useRoute()
 const router = useRouter()
@@ -457,8 +461,6 @@ const { showEditModal, editContent, copySvgName, copyContent,
 
 const virtualContainerRef = ref<HTMLElement | null>(null)
 
-const { addFileTypeClassToLinks, startObserving, stopObserving, setStreaming } = useCodeEnhancer(virtualContainerRef)
-
 const currentMessages = computed(() => chatStore.currentChatMessages)
 const listItems = computed<any>(() => {
   const msgs = currentMessages.value as (Message | { __streaming: boolean })[]
@@ -501,30 +503,14 @@ const virtualizer = useVirtualizer(
 )
 
 onStreamEnd.value = (fullText: string) => {
-  const messages = chatStore.getActiveMessages()
-
   if (regeneratingMsg.value) {
     const msg = regeneratingMsg.value
     msg.content = fullText
     regeneratingMsg.value = null
-    nextTick(() => {
-      setStreaming(false)
-      addFileTypeClassToLinks(virtualContainerRef.value!)
-    })
     return
-  }
-
-  const lastMsg = messages[messages.length - 1]
-  if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === fullText) {
-    nextTick(() => {
-      addFileTypeClassToLinks(virtualContainerRef.value!)
-    })
   }
 }
 
-watch(streamingContent, (newVal) => {
-  setStreaming(!!newVal)
-})
 
 watch(() => selected.value, (newVal) => {
   localStorage.setItem('thinking', newVal ? 'true' : 'false')
@@ -709,36 +695,6 @@ async function onSaveEdit() {
   requestAnimationFrame(() => virtualizer.value?.measure())
 }
 
-function previewImage(imageUrl:string) {
-  const container = document.createElement('div')
-  container.style.display = 'none'
-  document.body.appendChild(container)
-
-  const vnode = h(NImage, {
-    src: imageUrl,
-  })
-
-  render(vnode, container)
-
-  nextTick(() => {
-    const imgEl = container.querySelector('img')
-    if (imgEl) {
-      imgEl.click()
-    }
-    setTimeout(() => {
-      document.body.removeChild(container)
-    }, 200)
-  })
-}
-
-const onContainerClick = (e: any) => {
-  const target = e.target
-  if (target.tagName === 'IMG') {
-    e.preventDefault()
-    previewImage(target.src)
-  }
-}
-
 function forceScrollToBottom() {
   isAutoScrollEnabled.value = true
   virtualizer.value.scrollToIndex(listItems.value.length - 1, { align: 'end' })
@@ -766,7 +722,6 @@ onMounted(async () => {
     resizeTimer = setTimeout(checkMobile, 150)
   })
   await profileStore.loadProfiles()
-  startObserving()
   fetch('/api/local-ip').then(async (res) => {
     local_ip.value = await res.json()
     localIP.value = local_ip.value
@@ -782,8 +737,6 @@ onUnmounted(() => {
   if (jellyTimer) clearTimeout(jellyTimer)
   if (pasteToastTimer) clearTimeout(pasteToastTimer)
   window.removeEventListener('resize', checkMobile)
-  stopObserving()
-
   // 清理 markstream-vue 自定义组件注册
   removeCustomComponents('chat')
 })
@@ -818,7 +771,6 @@ watch(
   () => chatStore.currentChatMessages.length,
   () => {
     nextTick(async () => {
-      addFileTypeClassToLinks(virtualContainerRef.value!)
       if (isAutoScrollEnabled.value) {
         scrollToBottom()
       }

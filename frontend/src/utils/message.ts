@@ -42,7 +42,7 @@ export function processMessageContent(text: string, isStreaming = false): string
       // 转义闭合标签
       const safeContent = afterStart.replace(/<\/reasoning>/g, '\u003c/reasoning>')
       // 移除原始标记，替换为未闭合的自定义标签（markstream-vue 会自动处理 loading 状态）
-      processedText = processedText.substring(0, startIdx) + `<reasoning loading="true">${safeContent}</reasoning>`
+      processedText = processedText.substring(0, startIdx) + `<reasoning loading="true">${safeContent}`
     }
   }
 
@@ -203,50 +203,23 @@ export function processMessageContent(text: string, isStreaming = false): string
   )
 
   // 5. 处理 Token 用量 → 转换为 <tokenusage> 自定义标签（注意：标签名不能包含下划线）
-  const hasToolCalls = /<toolcalls>|<toolpreview>/.test(processedText)
-  if (!hasToolCalls) {
-    processedText = processedText.replace(
-      /<!--token_usage:(.*?)-->/g,
-      (_, jsonStr) => {
-        try {
-          const data = JSON.parse(jsonStr)
-          const tagContent = JSON.stringify({
-            speed: data.speed || '0 token/s',
-            completion_tokens: data.final_answer_usage?.completion_tokens ?? 0
-          })
-          // 注意：标签名使用 tokenusage（不带下划线）
-          return `<tokenusage>${escapeHtml(tagContent)}</tokenusage>`
-        } catch {
-          return ''
-        }
+  processedText = processedText.replace(
+    /<!--token_usage:(.*?)-->/g,
+    (_, jsonStr) => {
+      try {
+        const data = JSON.parse(jsonStr)
+        const tagContent = JSON.stringify({
+          speed: data.speed || '0 token/s',
+          completion_tokens: data.final_answer_usage?.completion_tokens ?? 0
+        })
+        return `<tokenusage>${escapeHtml(tagContent)}</tokenusage>`
+      } catch {
+        return ''
       }
-    )
-  } else {
-    // 有工具调用的场景：移除 token_usage 注释
-    processedText = processedText.replace(/<!--token_usage:.*?-->/g, '')
-  }
-
+    }
+  )
   // 清理多余换行
   processedText = processedText.replace(/\n{3,}/g, '\n\n')
-
-  // 处理 Markdown 链接中的 Windows 绝对路径
-  processedText = processedText.replace(
-    /\[([^\]]+)\]\(([A-Za-z]:[\\/][^)]+)\)/g,
-    (match, text, path) => {
-      const normalizedPath = path.replace(/\\/g, '/')
-      return `[${text}](/win/${normalizedPath})`
-    }
-  )
-
-  // 处理裸路径（没有 [] 包裹的）
-  processedText = processedText.replace(
-    /(?<![\]\(])([A-Za-z]:[\\/][^\s<>"'()[\]]+)/g,
-    (match, path) => {
-      const normalizedPath = path.replace(/\\/g, '/')
-      return `[${path}](/win/${normalizedPath})`
-    }
-  )
-
   return processedText.trim()
 }
 
