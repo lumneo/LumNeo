@@ -20,9 +20,7 @@ const props = defineProps<{
 
 const data = computed(() => {
   try {
-    const content = props.node.content || '{}'
-    console.log(content,'===');
-    
+    const content = props.node.content || '{}'    
     return JSON.parse(content)
   } catch(e) {
     console.error(e)

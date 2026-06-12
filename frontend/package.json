@@ -21,6 +21,7 @@
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
+    "@antv/infographic": "^0.2.19",
     "@vitejs/plugin-vue": "^6.0.7",
     "fast-glob": "^3.3.3",
     "typescript": "^6.0.3",

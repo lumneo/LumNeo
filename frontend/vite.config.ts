@@ -7,11 +7,13 @@ import viteCompression from 'vite-plugin-compression'
 
 
 const CHUNK_GROUPS: Record<string, string[]> = {
-  'vendor-base': ['vue', 'vue-router', 'pinia', '@vue', '@vicons', '@tanstack/vue-virtual', 
+  'vendor-base': ['vue', 'vue-router', 'pinia', '@vue', '@vicons', 
     '@tanstack/virtual-core', 'naive-ui', 'vueuc', 'css-render', 'seemly', 'treemate', 
-    'marked', 'markdown-it', 'markstream-vue', 'stream-markdown', 'katex'],
+    'marked', 'markdown-it', 'markstream-vue', 'katex'],
+  'vendor-virtual': ['@tanstack/vue-virtual'],
   'vendor-monaco': ['monaco-editor', 'stream-monaco'],
-  'vendor-mermaid': ['mermaid', 'd3'],
+  'vendor-mermaid-infographic': ['mermaid', 'infographic'],
+  'vendor-d2': ['d2'],
 }
 
 const getChunkName = (id: string): string | undefined => {
@@ -68,7 +70,9 @@ export default defineConfig(({ mode }) => {
     include: [
       'vue', 'vue-router', 'pinia', 'naive-ui',
       'katex', '@tanstack/vue-virtual', 'mermaid',
-      'markstream-vue', 'stream-monaco',
+    ],
+    exclude: [
+      'monaco-editor',
     ],
   },
   plugins: [

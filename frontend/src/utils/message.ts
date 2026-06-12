@@ -22,7 +22,7 @@ export function processMessageContent(text: string, isStreaming = false): string
       content = content.replace(/```mermaid(\s|$)/g, '```text$1')
       // 转义内容中的 </reasoning> 避免提前闭合
       const safeContent = content.replace(/<\/reasoning>/g, '\u003c/reasoning>')
-      return `<reasoning time="${time}">${safeContent}</reasoning>`
+      return `\n\n<reasoning time="${time}">${safeContent}</reasoning>\n\n`
     }
   )
 
@@ -35,7 +35,7 @@ export function processMessageContent(text: string, isStreaming = false): string
       // 转义闭合标签
       const safeContent = afterStart.replace(/<\/reasoning>/g, '\u003c/reasoning>')
       // 移除原始标记，替换为未闭合的自定义标签（markstream-vue 会自动处理 loading 状态）
-      processedText = processedText.substring(0, startIdx) + `<reasoning loading="true">${safeContent}`
+      processedText = processedText.substring(0, startIdx) + `\n\n<reasoning loading="true">${safeContent}`
     }
   }
 
@@ -136,7 +136,7 @@ export function processMessageContent(text: string, isStreaming = false): string
       })
 
       // 注意：标签名使用 toolpreview（不带下划线）
-      const key = `<toolpreview>${tagContent}</toolpreview>`
+      const key = `\n\n<toolpreview>${tagContent}</toolpreview>\n\n`
       processedText = processedText.substring(0, firstStart) + key + processedText.substring(previewRegionEnd)
     }
   }
@@ -191,7 +191,7 @@ export function processMessageContent(text: string, isStreaming = false): string
 
       // 注意：标签名使用 toolcalls（不带下划线）
       const tagContent = JSON.stringify(tools)
-      return `<toolcalls>${tagContent}</toolcalls>`
+      return `\n\n<toolcalls>${tagContent}</toolcalls>\n\n`
     }
   )
 
@@ -205,7 +205,7 @@ export function processMessageContent(text: string, isStreaming = false): string
           speed: data.speed || '0 token/s',
           completion_tokens: data.final_answer_usage?.completion_tokens ?? 0
         })
-        return `<tokenusage>${tagContent}</tokenusage>`
+        return `\n\n<tokenusage>${tagContent}</tokenusage>\n\n`
       } catch {
         return ''
       }

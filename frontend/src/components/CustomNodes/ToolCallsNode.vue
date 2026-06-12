@@ -71,9 +71,7 @@ const copySuccess = ref(false)
 
 const tools = computed<ToolCall[]>(() => {
   try {
-    const content = props.node.content || '[]'
-    console.log(content);
-    
+    const content = props.node.content || '[]'    
     const parsed = JSON.parse(content)
     if (Array.isArray(parsed)) {
       return parsed.map(t => ({
@@ -255,15 +253,15 @@ const title = computed(() => {
 }
 
 .tool-args code {
-  font-family: 'Courier New', monospace;
+  font-family: 'Courier New', '微软雅黑', monospace;
   font-size: 12px;
   color: var(--text-code, #999);
 }
 
 .result-content code {
-  font-family: 'Courier New', monospace;
+  font-family: 'Courier New', '微软雅黑', monospace;
   font-size: 12px;
-  color: var(--text-success, #52c41a);
+  color: var(--text-info, #26cf6d);
 }
 .code-block-wrapper .copy-code-btn {
   position: absolute;

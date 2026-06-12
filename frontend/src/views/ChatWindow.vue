@@ -144,10 +144,11 @@
         </n-flex>
       </header>
 
-      <!-- 虚拟消息列表组件 -->
-      <VirtualMessageList
+      <!-- 消息列表组件 -->
+      <MessageList
         ref="messageListRef"
         v-if="chatStore.activeChatId"
+        :chat-id="chatStore.activeChatId"
         :messages="currentMessages"
         :is-mobile="isMobile"
         :is-loading="isLoading"
@@ -176,7 +177,7 @@
         :is-loading="isLoading"
         :disabled="isLoading || !chatStore.activeChatId || !activeModelId"
         :uploaded-files="uploadedFiles"
-        :show-scroll-btn="!messageListRef?.isAtEnd"
+        :show-scroll-btn="messageListRef?.showScrollBtn"
         :show-regenerate-hint="!isLoading && currentMessages.length >= 1 && currentMessages[currentMessages.length - 1]?.role === 'user'"
         :show-deep-think="configStore.activeModel?.type === 'online'"
         :max-files="fileConfig.max"
@@ -184,7 +185,7 @@
         :before-upload="onBeforeUpload"
         @send="onSendMessage"
         @stop="stopGeneration"
-        @scroll-bottom="messageListRef?.scrollToLatest()"
+        @scroll-bottom="messageListRef?.scrollToLatestSmooth()"
         @remove-file="removeFile"
         @regenerate-current="onRegenerateFromCurrentHistory"
         @files-paste="handlePasteFiles"
@@ -215,7 +216,8 @@ import { useProfileStore } from '@/stores/profiles'
 import SettingsDrawer from '@/components/SettingsDrawer.vue'
 import Introduction from '@/components/Introduction.vue'
 import mSvg from '@/components/MSvg.vue'
-import VirtualMessageList from '@/components/VirtualMessageList.vue'
+// import VirtualMessageList from '@/components/VirtualMessageList.vue'
+import MessageList from '@/components/MessageList.vue'
 import ChatInput from '@/components/ChatInput.vue'
 
 import { useModel } from '@/composables/useModel'
@@ -257,7 +259,7 @@ const { showEditModal, editContent, copySvgName, copyContent,
   startEditMessage, saveEdit, renamingChatId, renameText, startRename, confirmRename
 } = useMessageActions()
 
-const messageListRef = ref<InstanceType<typeof VirtualMessageList> | null>(null)
+const messageListRef = ref<InstanceType<typeof MessageList> | null>(null)
 
 const currentMessages = computed(() => chatStore.currentChatMessages)
 
@@ -339,8 +341,6 @@ onMounted(async () => {
   await profileStore.loadProfiles()
   fetch('/api/system-info').then(async (res) => {
     const data = await res.json()
-    console.log(data);
-    
     localIP.value = data.local_ip
     uploadDir.value = data.upload_dir
     setQRCodeUrl()
