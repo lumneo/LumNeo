@@ -115,6 +115,11 @@ class MemoryRepository(ABC):
         ...
 
     @abstractmethod
+    def record_access(self, memory_id: str) -> None:
+        """异步更新记忆的 last_accessed 和 access_count（仅限检索副作用）。"""
+        ...
+
+    @abstractmethod
     def check_consistency(self) -> ConsistencyReport:
         """执行一致性校验。"""
         ...
@@ -141,7 +146,8 @@ class SQLiteMemoryRepository(MemoryRepository):
     def _init_db(self):
         """初始化数据库连接，执行迁移。"""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path))
+        self.data_root.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         # self.conn.execute("PRAGMA journal_mode = WAL")  # WAL 模式下，SQLite 会在内存中缓存数据，并在事务提交时将数据写入磁盘，从而提高并发性能。
@@ -161,6 +167,87 @@ class SQLiteMemoryRepository(MemoryRepository):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
         return False
+
+    def _row_to_memory(self, row: sqlite3.Row) -> MemoryObject:
+        """从 SQLite 行构造 MemoryObject（含 evidence）。"""
+        # 解析 JSON 字段
+        source_dict = json.loads(row['source_json'])
+        privacy_dict = json.loads(row['privacy_json']) if row['privacy_json'] else None
+        metadata_dict = json.loads(row['metadata_json']) if row['metadata_json'] else {}
+        tags_list = json.loads(row['tags_json']) if row['tags_json'] else []
+        condition_dict = json.loads(row['condition_json']) if row['condition_json'] else None
+
+        # 构造 Source
+        source = Source(
+            tenant_id=source_dict.get('tenant_id'),
+            agent_id=source_dict.get('agent_id'),
+            chat_id=source_dict.get('chat_id'),
+            message_id=source_dict.get('message_id'),
+            timestamp=datetime.fromisoformat(source_dict['timestamp']) if source_dict.get('timestamp') else utc_now(),
+            channel=source_dict.get('channel'),
+            extra=source_dict.get('extra')
+        )
+
+        # 构造 PrivacyInfo
+        privacy = PrivacyInfo(
+            level=privacy_dict['level'],
+            reason=privacy_dict.get('reason')
+        ) if privacy_dict else None
+
+        # 查询证据
+        ev_cursor = self.conn.execute(
+            "SELECT * FROM evidence WHERE memory_id = ?", (row['id'],)
+        )
+        evidence_list = []
+        for ev_row in ev_cursor.fetchall():
+            ev_source_dict = json.loads(ev_row['source_json'])
+            ev_source = Source(
+                tenant_id=ev_source_dict.get('tenant_id'),
+                agent_id=ev_source_dict.get('agent_id'),
+                chat_id=ev_source_dict.get('chat_id'),
+                message_id=ev_source_dict.get('message_id'),
+                timestamp=datetime.fromisoformat(ev_source_dict['timestamp']) if ev_source_dict.get('timestamp') else utc_now(),
+                channel=ev_source_dict.get('channel'),
+                extra=ev_source_dict.get('extra')
+            )
+            evidence = Evidence(
+                type=ev_row['type'],
+                weight=ev_row['weight'],
+                source=ev_source,
+                observation=ev_row['observation'],
+                origin_actor=ev_row['origin_actor'],
+                created_at=datetime.fromisoformat(ev_row['created_at']),
+                provenance_key=ev_row['provenance_key']
+            )
+            evidence_list.append(evidence)
+
+        return MemoryObject(
+            id=row['id'],
+            schema_version=row['schema_version'],
+            layer=row['layer'],
+            type=row['type'],
+            subject=row['subject'],
+            predicate=row['predicate'],
+            object=row['object'],
+            condition=condition_dict,
+            content=row['content'],
+            confidence=row['confidence'],
+            confidence_detail=None,
+            importance=row['importance'],
+            status=row['status'],
+            evidence=evidence_list,
+            source=source,
+            origin=row['origin'],
+            supersedes=row['supersedes'],
+            superseded_by=row['superseded_by'],
+            last_accessed=datetime.fromisoformat(row['last_accessed']) if row['last_accessed'] else None,
+            access_count=row['access_count'],
+            tags=tags_list,
+            privacy=privacy,
+            created_at=datetime.fromisoformat(row['created_at']),
+            updated_at=datetime.fromisoformat(row['updated_at']),
+            metadata=metadata_dict
+        )
 
     def _create_audit_table(self):
         """创建审计日志表（如果不存在）"""
@@ -400,94 +487,97 @@ class SQLiteMemoryRepository(MemoryRepository):
 
         # 2. 从 SQLite 行构造 MemoryObject
         try:
-            # 解析 JSON 字段
-            source_dict = json.loads(row['source_json'])
-            privacy_dict = json.loads(row['privacy_json']) if row['privacy_json'] else None
-            metadata_dict = json.loads(row['metadata_json']) if row['metadata_json'] else {}
-            tags_list = json.loads(row['tags_json']) if row['tags_json'] else []
-            condition_dict = json.loads(row['condition_json']) if row['condition_json'] else None
-
-            # 构造 Source
-            source = Source(
-                tenant_id=source_dict.get('tenant_id'),
-                agent_id=source_dict.get('agent_id'),
-                chat_id=source_dict.get('chat_id'),
-                message_id=source_dict.get('message_id'),
-                timestamp=datetime.fromisoformat(source_dict['timestamp']) if source_dict.get('timestamp') else utc_now(),
-                channel=source_dict.get('channel'),
-                extra=source_dict.get('extra')
-            )
-
-            # 构造 PrivacyInfo
-            privacy = PrivacyInfo(
-                level=privacy_dict['level'],
-                reason=privacy_dict.get('reason')
-            ) if privacy_dict else None
-
-            # 查询证据
-            ev_cursor = self.conn.execute(
-                "SELECT * FROM evidence WHERE memory_id = ?", (memory_id,)
-            )
-            evidence_list = []
-            for ev_row in ev_cursor.fetchall():
-                ev_source_dict = json.loads(ev_row['source_json'])
-                ev_source = Source(
-                    tenant_id=ev_source_dict.get('tenant_id'),
-                    agent_id=ev_source_dict.get('agent_id'),
-                    chat_id=ev_source_dict.get('chat_id'),
-                    message_id=ev_source_dict.get('message_id'),
-                    timestamp=datetime.fromisoformat(ev_source_dict['timestamp']) if ev_source_dict.get('timestamp') else utc_now(),
-                    channel=ev_source_dict.get('channel'),
-                    extra=ev_source_dict.get('extra')
-                )
-                evidence = Evidence(
-                    type=ev_row['type'],
-                    weight=ev_row['weight'],
-                    source=ev_source,
-                    observation=ev_row['observation'],
-                    origin_actor=ev_row['origin_actor'],
-                    created_at=datetime.fromisoformat(ev_row['created_at']),
-                    provenance_key=ev_row['provenance_key']
-                )
-                evidence_list.append(evidence)
-
-            # 构造 MemoryObject
-            memory = MemoryObject(
-                id=row['id'],
-                schema_version=row['schema_version'],
-                layer=row['layer'],
-                type=row['type'],
-                subject=row['subject'],
-                predicate=row['predicate'],
-                object=row['object'],
-                condition=condition_dict,
-                content=row['content'],
-                confidence=row['confidence'],
-                confidence_detail=None,  # Phase 1 未使用
-                importance=row['importance'],
-                status=row['status'],
-                evidence=evidence_list,
-                source=source,
-                origin=row['origin'],
-                supersedes=row['supersedes'],
-                superseded_by=row['superseded_by'],
-                last_accessed=datetime.fromisoformat(row['last_accessed']) if row['last_accessed'] else None,
-                access_count=row['access_count'],
-                tags=tags_list,
-                privacy=privacy,
-                created_at=datetime.fromisoformat(row['created_at']),
-                updated_at=datetime.fromisoformat(row['updated_at']),
-                metadata=metadata_dict
-            )
-            return memory
+            return self._row_to_memory(row)
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             raise PersistenceError(f"反序列化记忆 {memory_id} 失败: {e}")
 
-    def query_active(self, need: MemoryNeed, scope_filter: Optional[dict] = None) -> List[MemoryObject]:
-        raise NotImplementedError("query_active 将在 T6 实现")
+    def query_active(
+        self,
+        need: MemoryNeed,
+        scope_filter: Optional[dict] = None
+    ) -> List[MemoryObject]:
+        """
+        检索 active 状态记忆，强制 Scope 过滤。
+        scope_filter 优先于 need.scope_filter。
+        """
+        # 合并 scope 过滤条件
+        scope = scope_filter or need.scope_filter or {}
+        tenant_id = scope.get('tenant_id')
+        agent_id = scope.get('agent_id')
 
-    def query_by_status(self, status: MemoryStatus, scope_filter: Optional[dict] = None, limit: int = 100) -> List[MemoryObject]:
-        raise NotImplementedError("query_by_status 将在 T6 实现")
+        sql = "SELECT * FROM memories WHERE status = 'active'"
+        params = []
+
+        if tenant_id:
+            sql += " AND json_extract(source_json, '$.tenant_id') = ?"
+            params.append(tenant_id)
+        if agent_id:
+            sql += " AND json_extract(source_json, '$.agent_id') = ?"
+            params.append(agent_id)
+
+        # Layer 过滤
+        if need.layers:
+            placeholders = ','.join(['?'] * len(need.layers))
+            sql += f" AND layer IN ({placeholders})"
+            params.extend(need.layers)
+
+        # Type 过滤
+        if need.types:
+            placeholders = ','.join(['?'] * len(need.types))
+            sql += f" AND type IN ({placeholders})"
+            params.extend(need.types)
+
+        # FTS5 全文搜索
+        if need.keywords:
+            # 将关键词列表合并为一个查询字符串（空格分隔，FTS5 会分词）
+            query_str = ' '.join(need.keywords)
+            sql += " AND rowid IN (SELECT rowid FROM memories_fts WHERE content MATCH ?)"
+            params.append(query_str)
+
+        # 限制结果数量
+        if need.max_results:
+            sql += f" LIMIT {need.max_results}"
+
+        cursor = self.conn.execute(sql, params)
+        rows = cursor.fetchall()
+
+        result = []
+        for row in rows:
+            result.append(self._row_to_memory(row))
+        return result
+
+    def query_by_status(
+        self,
+        status: MemoryStatus,
+        scope_filter: Optional[dict] = None,
+        limit: int = 100
+    ) -> List[MemoryObject]:
+        """
+        按状态批量查询，强制 Scope 过滤。
+        """
+        scope = scope_filter or {}
+        tenant_id = scope.get('tenant_id')
+        agent_id = scope.get('agent_id')
+
+        sql = "SELECT * FROM memories WHERE status = ?"
+        params = [status]
+
+        if tenant_id:
+            sql += " AND json_extract(source_json, '$.tenant_id') = ?"
+            params.append(tenant_id)
+        if agent_id:
+            sql += " AND json_extract(source_json, '$.agent_id') = ?"
+            params.append(agent_id)
+
+        sql += f" LIMIT {limit}"
+
+        cursor = self.conn.execute(sql, params)
+        rows = cursor.fetchall()
+
+        result = []
+        for row in rows:
+            result.append(self._row_to_memory(row))
+        return result
 
     # ---------- 索引与一致性 ----------
     def rebuild_index(self, force_ids: Optional[List[str]] = None) -> ConsistencyReport:
@@ -549,6 +639,15 @@ class SQLiteMemoryRepository(MemoryRepository):
 
         # 返回一致性报告（仅作参考）
         return self.check_consistency()
+
+    def record_access(self, memory_id: str) -> None:
+        """异步更新 last_accessed 和 access_count（仅限检索副作用）。"""
+        now = utc_now()
+        self.conn.execute(
+            "UPDATE memories SET last_accessed = ?, access_count = access_count + 1 WHERE id = ?",
+            (now.isoformat(), memory_id)
+        )
+        self.conn.commit()
     
     def check_consistency(self) -> ConsistencyReport:
         """遍历 Markdown SoT，与 SQLite 比对，返回一致性报告。"""
