@@ -21,11 +21,13 @@ class MemoryCandidate(BaseModel):
     subject: Optional[str] = None
     predicate: Optional[str] = None
     object: Optional[str] = None
+    condition: Optional[dict] = None
     evidence: list[Evidence] = Field(..., min_length=1)
     source: Source
     origin_actor: EvidenceActor
     confidence_hint: Optional[float] = Field(None, ge=0.0, le=1.0)
     capture_id: str = Field(..., min_length=1)
+    correction_target: Optional[str] = None
     dedup_key: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

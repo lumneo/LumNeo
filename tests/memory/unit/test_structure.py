@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 
 # 导入被测模块
-from lumneo.kernel.config.app_config import config
+from lumneo.kernel.config.app_config import config, PROJECT_ROOT, MIGRATIONS_DIR
 
 
 # ========== 测试 1: MemoryOS 包可导入 ==========
@@ -134,10 +134,10 @@ def test_directory_structure_matches_adr009():
     #   -> memory (parent.parent)
     #   -> tests (parent.parent.parent)
     #   -> lumneo (parent.parent.parent.parent) — 项目根
-    project_root = Path(__file__).parent.parent.parent.parent
+    project_root = PROJECT_ROOT
 
     # 检查 lumneo/memory 子包
-    lumneo_memory_base = project_root / "lumneo" / "memory"
+    lumneo_memory_base = project_root / "src" / "lumneo" / "memory"
     expected_lumneo_dirs = [
         lumneo_memory_base / "capture",
         lumneo_memory_base / "evaluator",
@@ -150,12 +150,12 @@ def test_directory_structure_matches_adr009():
     ]
 
     for d in expected_lumneo_dirs:
-        assert d.exists(), f"lumneo/memory 子包缺失: {d}"
+        assert d.exists(), f"src/lumneo/memory 子包缺失: {d}"
         assert d.is_dir()
         init_file = d / "__init__.py"
         assert init_file.exists(), f"子包缺少 __init__.py: {init_file}"
 
     # 验证 migrations 目录
-    migrations_dir = project_root / "migrations"
+    migrations_dir = MIGRATIONS_DIR
     assert migrations_dir.exists()
     assert (migrations_dir / "migrate_v0.0_to_v1.0.sql").exists()

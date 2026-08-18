@@ -7,7 +7,6 @@
 import os
 import sys
 from pathlib import Path
-
 import yaml
 
 
@@ -239,3 +238,6 @@ class AppConfig:
 
 
 config = AppConfig()
+
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
+MIGRATIONS_DIR = PROJECT_ROOT / "migrations"

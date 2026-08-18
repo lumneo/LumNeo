@@ -9,18 +9,23 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Tuple
 from collections import defaultdict
+from rapidfuzz import fuzz
 
 from lumneo.memory.model.memory_candidate import MemoryCandidate
 from lumneo.memory.model.memory_object import MemoryObject
 from lumneo.memory.model.enums import MemoryOrigin
 from lumneo.memory.model.auxiliary import Source
-
+from lumneo.memory.model.user_directive import UserDirective
+from lumneo.memory.storage.repository import AuditLogEntry
+from ..common.time import utc_now
 from .layer_type import classify_layer_type
 from .dedup import deduplicate_evidence
 from .confidence import calculate_confidence
 
 # 活跃阈值（Contract §5.1）
 ACTIVE_CONFIDENCE_THRESHOLD = 0.55
+# Batch 内冲突判定阈值
+BATCH_CONFLICT_SIMILARITY_THRESHOLD = 0.75
 
 
 def _string_similarity(s1: Optional[str], s2: Optional[str]) -> float:
@@ -37,10 +42,41 @@ def _string_similarity(s1: Optional[str], s2: Optional[str]) -> float:
     union = len(set1 | set2)
     return inter / union if union > 0 else 0.0
 
+def _condition_conflict(cond1: Optional[dict], cond2: Optional[dict]) -> bool:
+    """
+    检测两个 condition 是否存在互斥键值对。
+    仅支持扁平对象和 AND 组合（最多 5 项）。
+    若存在任一键值对冲突（相同 key，不同 value），返回 True。
+    """
+    if cond1 is None or cond2 is None:
+        return False
+    # 展平 clause
+    def flatten(cond):
+        if cond is None:
+            return {}
+        if "operator" in cond and cond["operator"] == "AND":
+            # 将 AND 的 clauses 合并为 dict
+            result = {}
+            for clause in cond.get("clauses", []):
+                if isinstance(clause, dict) and "key" in clause and "value" in clause:
+                    result[clause["key"]] = clause["value"]
+            return result
+        # 扁平对象
+        if "key" in cond and "value" in cond:
+            return {cond["key"]: cond["value"]}
+        return {}
+    d1 = flatten(cond1)
+    d2 = flatten(cond2)
+    for key, val in d1.items():
+        if key in d2 and d2[key] != val:
+            return True
+    return False
+
 
 class Evaluator:
-    def __init__(self, confidence_cap: float = 1.0):
+    def __init__(self, confidence_cap: float = 1.0, repository=None):
         self.confidence_cap = confidence_cap
+        self.repository = repository
 
     def _build_base_object(self, candidate: MemoryCandidate) -> MemoryObject:
         """
@@ -121,74 +157,64 @@ class Evaluator:
             }
         )
 
-    def evaluate(self, candidate: MemoryCandidate) -> MemoryObject:
-        """单候选评估（无冲突检测）"""
-        return self._build_base_object(candidate)
+    def _check_cycle(self, old_memory: MemoryObject, new_id: str) -> bool:
+        """检查如果让 new_id 指向 old_memory，是否会形成环（假设 old_memory 可能已有 supersedes 链）"""
+        # 如果 old_memory 的 supersedes 链中包含 new_id，则成环（但 new_id 是新生成的，不可能在链中）
+        # 为安全，我们遍历祖先链
+        current = old_memory
+        visited = set()
+        while current:
+            if current.id == new_id:
+                return True
+            if current.id in visited:
+                # 已存在环（理论上不应该），视为危险
+                return True
+            visited.add(current.id)
+            if current.supersedes:
+                # 需要加载被 supersedes 的记忆（可能不在内存中）
+                if self.repository is None:
+                    break
+                current = self.repository.get_by_id(current.supersedes)
+                if current is None:
+                    break
+            else:
+                break
+        return False
 
-    def evaluate_batch(self, candidates: List[MemoryCandidate]) -> List[MemoryObject]:
-        """
-        批量评估，包含同 capture_id 内的冲突检测。
-        冲突规则（Contract §5.3）：
-          - 相同 subject+predicate 且 object 高度相似 → 新记忆 supersede 旧记忆
-          - 明显不同 → 独立写入
-          - 无法判断 → 新记忆进入 needs_review
-        """
-        if not candidates:
-            return []
-
-        # 第一步：为每个候选生成基础对象（此时状态为 active 或 needs_review，不含冲突处理）
-        base_items = [(cand, self._build_base_object(cand)) for cand in candidates]
-
-        # 按 capture_id 分组（通常所有候选来自同一 capture，但防御性处理）
-        groups: Dict[str, List[Tuple[MemoryCandidate, MemoryObject]]] = defaultdict(list)
+    def _process_conflicts(self, base_items: List[Tuple[MemoryCandidate, MemoryObject]]) -> List[MemoryObject]:
+        """原有的冲突检测逻辑（从 evaluate_batch 中提取）"""
+        groups = defaultdict(list)
         for cand, obj in base_items:
             groups[cand.capture_id].append((cand, obj))
 
-        # 最终结果容器：id -> MemoryObject，以及保持顺序的 id 列表
-        final_map: Dict[str, MemoryObject] = {}
-        ordered_ids: List[str] = []
+        final_map = {}
+        ordered_ids = []
 
-        # 对每个分组进行冲突检测
         for cap_id, items in groups.items():
-            # seen: (subject, predicate) -> (candidate, memory_object)
-            # 用于检测同一键下的重复
-            seen: Dict[Tuple[str, str], Tuple[MemoryCandidate, MemoryObject]] = {}
-
+            seen = {}
             for cand, obj in items:
                 key = (cand.subject, cand.predicate)
-
-                # 若 subject 或 predicate 缺失，则无法进行冲突检测，直接保留
                 if cand.subject is None or cand.predicate is None:
                     final_map[obj.id] = obj
                     ordered_ids.append(obj.id)
                     continue
-
                 if key not in seen:
-                    # 首次出现，记录并放入结果
                     seen[key] = (cand, obj)
                     final_map[obj.id] = obj
                     ordered_ids.append(obj.id)
                 else:
-                    # 检测到冲突
                     prev_cand, prev_obj = seen[key]
                     sim = _string_similarity(prev_cand.object, cand.object)
-
-                    # 检查新记忆是否因 layer-type 问题而无法 active
                     if obj.metadata.get("layer_type_verdict") == "suspicious":
-                        # 新记忆本身有问题，不能覆盖旧记忆，保留其原状态（needs_review）
                         final_map[obj.id] = obj
                         ordered_ids.append(obj.id)
-                        # 不更新 seen，旧记忆仍作为该键的代表
                     else:
                         if sim >= 0.75:
-                            # 高度相似：新记忆取代旧记忆
-                            # 旧记忆 -> superseded
                             updated_prev = prev_obj.model_copy(update={
                                 "status": "superseded",
                                 "superseded_by": obj.id,
                                 "updated_at": datetime.now(timezone.utc)
                             })
-                            # 新记忆 -> active，并关联旧记忆
                             updated_new = obj.model_copy(update={
                                 "status": "active",
                                 "supersedes": prev_obj.id,
@@ -198,21 +224,14 @@ class Evaluator:
                                     "superseded_old_id": prev_obj.id,
                                 }
                             })
-                            # 更新 final_map
                             final_map[prev_obj.id] = updated_prev
                             final_map[obj.id] = updated_new
-                            # 更新 seen 中的对象为新记忆（因为新记忆已成为该键的最新代表）
                             seen[key] = (cand, updated_new)
-                            # 追加新 id（旧 id 已经在列表中）
                             ordered_ids.append(obj.id)
-
                         elif sim <= 0.40:
-                            # 明显不同：独立写入，不覆盖
                             final_map[obj.id] = obj
                             ordered_ids.append(obj.id)
-                            # 不更新 seen，旧记忆仍为键代表
                         else:
-                            # 无法安全判断：新记忆进入 needs_review
                             updated_new = obj.model_copy(update={
                                 "status": "needs_review",
                                 "updated_at": datetime.now(timezone.utc),
@@ -224,10 +243,320 @@ class Evaluator:
                             })
                             final_map[obj.id] = updated_new
                             ordered_ids.append(obj.id)
-                            # 不更新 seen
-
-        # 按原始顺序返回
         return [final_map[oid] for oid in ordered_ids if oid in final_map]
+
+    def _resolve_conflict_with_existing(
+        self,
+        candidate: MemoryCandidate,
+        new_obj: MemoryObject,
+        existing: List[MemoryObject]
+    ) -> Tuple[MemoryObject, Optional[MemoryObject]]:
+        if not existing:
+            return new_obj, None
+        old = existing[0]
+
+        # 1. Condition 交叉校验（不变）
+        if _condition_conflict(candidate.condition, old.condition):
+            updated_new = new_obj.model_copy(update={
+                "status": "needs_review",
+                "metadata": {**new_obj.metadata, "conflict_reason": "condition_conflict", "conflict_with": old.id}
+            })
+            return updated_new, None
+
+        # 2. generic_statement 特殊去重（不变）
+        is_generic_new = candidate.predicate == "generic_statement" or new_obj.predicate == "generic_statement"
+        is_generic_old = old.predicate == "generic_statement"
+        if is_generic_new and is_generic_old and candidate.subject == old.subject:
+            sim = fuzz.ratio(candidate.object or "", old.object or "") / 100.0
+            if sim >= 0.65:
+                updated_new = new_obj.model_copy(update={
+                    "status": "needs_review",
+                    "metadata": {**new_obj.metadata, "conflict_reason": "generic_statement_conflict", "conflict_with": old.id}
+                })
+                return updated_new, None
+
+        # 3. 计算相似度
+        sim = fuzz.ratio(candidate.object or "", old.object or "") / 100.0
+
+        # 4. 判断是否为偏好类
+        is_preference = (candidate.suggested_type in {"preference", "value", "decision"} or 
+                        new_obj.type in {"preference", "value", "decision"})
+
+        if is_preference:
+            # 偏好类：不建立版本链，旧记忆标记为 stale
+            old_updated = old.model_copy(update={
+                "status": "stale",
+                "updated_at": datetime.now(timezone.utc)
+            })
+            return new_obj, old_updated
+
+        # 5. 非偏好类常规逻辑
+        if sim >= 0.75:
+            # supersede
+            new_updated = new_obj.model_copy(update={
+                "status": "active",
+                "supersedes": old.id,
+                "metadata": {**new_obj.metadata, "superseded_old_id": old.id}
+            })
+            old_updated = old.model_copy(update={
+                "status": "superseded",
+                "superseded_by": new_obj.id,
+                "updated_at": datetime.now(timezone.utc)
+            })
+            return new_updated, old_updated
+        elif sim <= 0.40:
+            # independent
+            return new_obj, None
+        else:
+            # 无法判断
+            new_updated = new_obj.model_copy(update={
+                "status": "needs_review",
+                "metadata": {
+                    **new_obj.metadata,
+                    "conflict_reason": "similarity_unclear",
+                    "conflict_with": old.id,
+                    "similarity_score": sim,
+                }
+            })
+            return new_updated, None
+    
+    def _batch_conflict_detection(
+        self,
+        items: List[Tuple[MemoryCandidate, MemoryObject]]
+    ) -> List[Tuple[MemoryCandidate, MemoryObject]]:
+        """
+        同一 capture_id 内冲突检测（T4.4）。
+        对同 subject+predicate 且 object 相似度 < 阈值的候选，将除第一个外的候选标记为 needs_review。
+        若候选已因其他原因（如 layer_type）为 needs_review，保持不变。
+        """
+        # 按 capture_id 分组
+        groups: Dict[str, List[Tuple[MemoryCandidate, MemoryObject]]] = defaultdict(list)
+        for cand, obj in items:
+            groups[cand.capture_id].append((cand, obj))
+
+        result = []
+        for cap_id, group in groups.items():
+            # 再按 (subject, predicate) 分组
+            conflict_groups: Dict[Tuple[str, str], List[Tuple[MemoryCandidate, MemoryObject]]] = defaultdict(list)
+            for cand, obj in group:
+                key = (cand.subject, cand.predicate)
+                # 若 subject 或 predicate 缺失，不参与冲突检测（视为独立）
+                if cand.subject is None or cand.predicate is None:
+                    conflict_groups[("__none__", "__none__")].append((cand, obj))
+                else:
+                    conflict_groups[key].append((cand, obj))
+
+            for key, sub_items in conflict_groups.items():
+                if key == ("__none__", "__none__"):
+                    # 缺失 subject/predicate 的不参与冲突，直接保留
+                    result.extend(sub_items)
+                    continue
+
+                # 若组内只有一条，无冲突
+                if len(sub_items) <= 1:
+                    result.extend(sub_items)
+                    continue
+
+                # 组内有多条，按 object 相似度检测
+                # 先按置信度排序（降序），高置信度优先保留
+                sorted_items = sorted(sub_items, key=lambda x: x[1].confidence, reverse=True)
+                # 取第一个作为参考
+                first_cand, first_obj = sorted_items[0]
+                # 保留第一个，其余检测
+                for idx in range(1, len(sorted_items)):
+                    cand, obj = sorted_items[idx]
+                    # 如果该对象已因其他原因（如 layer_type）为 needs_review，保留其状态
+                    if obj.status == "needs_review":
+                        result.append((cand, obj))
+                        continue
+
+                    # 计算 object 相似度（使用 rapidfuzz.ratio）
+                    sim = fuzz.ratio(first_cand.object or "", cand.object or "") / 100.0
+                    if sim < BATCH_CONFLICT_SIMILARITY_THRESHOLD:
+                        # 互斥 object → 标记为 needs_review
+                        updated_obj = obj.model_copy(update={
+                            "status": "needs_review",
+                            "metadata": {
+                                **obj.metadata,
+                                "batch_conflict": True,
+                                "conflict_with_capture": cap_id,
+                                "conflict_reason": "batch_conflict",
+                            }
+                        })
+                        result.append((cand, updated_obj))
+                    else:
+                        # 相似度高，视为重复（或可保留原状态，但我们保留第一个，此条可能重复，但保留）
+                        # 为了安全，也将此条标记为 needs_review？但契约未明确，我们保留其原状态（可能 active）
+                        # 但为了避免重复，我们将其标记为 needs_review 并说明重复？但契约未要求。
+                        # 根据 T4.4 仅互斥 object 才 needs_review，相似度高的不视为冲突。
+                        # 我们保留原状态（可能 active），但注意它们有相同 subject/predicate 和相近 object，
+                        # 后续全局冲突可能处理。这里不做额外处理。
+                        result.append((cand, obj))
+
+                # 将第一个也加入结果
+                result.append((first_cand, first_obj))
+
+        return result
+    
+    def evaluate(self, candidate: MemoryCandidate, directives: Optional[List[UserDirective]] = None) -> MemoryObject:
+        if directives:
+            for d in directives:
+                if d.type == "correct" and d.target_type == "memory_id" and d.target == candidate.correction_target:
+                    if self.repository is None:
+                        raise RuntimeError("处理 correct 指令需要提供 repository")
+                    old_memory = self.repository.get_by_id(d.target)
+                    if old_memory is None or old_memory.status != "active":
+                        break
+                    # 构建新对象
+                    obj = self._build_base_object(candidate)
+                    # 检查环
+                    if self._check_cycle(old_memory, obj.id):
+                        raise ValueError("版本链成环，禁止操作")
+                    # 更新新对象元数据
+                    obj = obj.model_copy(update={
+                        "supersedes": old_memory.id,
+                        "status": "active",
+                        "metadata": {
+                            **obj.metadata,
+                            "corrected": True,
+                            "corrected_at": datetime.now(timezone.utc).isoformat(),
+                            "old_version": old_memory.id,
+                        }
+                    })
+                    # 先持久化新记忆
+                    created = self.repository.create(obj)
+                    # 再更新旧记忆
+                    old_memory_updated = old_memory.model_copy(update={
+                        "status": "superseded",
+                        "superseded_by": created.id,
+                        "updated_at": datetime.now(timezone.utc)
+                    })
+                    self.repository.update_with_version(old_memory_updated)
+                    try:
+                        self.repository.append_audit_log(
+                            AuditLogEntry(
+                                timestamp=utc_now(),
+                                action="correct",
+                                memory_id=old_memory.id,
+                                reason="用户纠正记忆",
+                                source={"directive": d.raw_text, "actor": "user"},
+                                payload={"old_object": old_memory.object, "new_object": candidate.object}
+                            )
+                        )
+                    except Exception:
+                        pass
+                    return created
+        return self._build_base_object(candidate)
+
+    def evaluate_batch(
+        self,
+        candidates: List[MemoryCandidate],
+        directives: Optional[List[UserDirective]] = None
+    ) -> List[MemoryObject]:
+        if not candidates:
+            return []
+
+        # ---------- 1. 构建基础对象 ----------
+        base_items = [(cand, self._build_base_object(cand)) for cand in candidates]
+
+        # ---------- 2. 处理 correct 指令（提前分离） ----------
+        corrected_results = []
+        remaining_items = []
+        correct_map = {}
+        if directives:
+            for d in directives:
+                if d.type == "correct" and d.target_type == "memory_id" and d.target:
+                    correct_map[d.target] = d
+
+        for cand, obj in base_items:
+            if cand.correction_target and cand.correction_target in correct_map:
+                old = self.repository.get_by_id(cand.correction_target)
+                if old and old.status == "active":
+                    if self._check_cycle(old, obj.id):
+                        raise ValueError("版本链成环")
+                    # 更新对象
+                    obj = obj.model_copy(update={
+                        "supersedes": old.id,
+                        "status": "active",
+                        "metadata": {**obj.metadata, "corrected": True, "old_version": old.id}
+                    })
+                    old_updated = old.model_copy(update={
+                        "status": "superseded",
+                        "superseded_by": obj.id,
+                        "updated_at": utc_now()
+                    })
+                    # 持久化（先创建新，再更新旧）
+                    created = self.repository.create(obj)
+                    self.repository.update_with_version(old_updated)
+                    corrected_results.append(created)
+                    continue
+            remaining_items.append((cand, obj))
+
+        # ---------- 3. Batch 内冲突检测 ----------
+        batch_processed = self._batch_conflict_detection(remaining_items)
+
+        # ---------- 4. 全局冲突检测（与已有 active 记忆） ----------
+        global_results = []
+        for cand, obj in batch_processed:
+            # 如果对象已经是 needs_review（包括因 batch 冲突标记的），跳过全局冲突
+            if obj.status == "needs_review":
+                global_results.append((cand, obj, None))
+                continue
+
+            # 查询已有 active 记忆
+            existing = []
+            if cand.subject and cand.predicate:
+                existing = self.repository.find_active_by_subject_predicate(cand.subject, cand.predicate)
+            if existing:
+                new_obj, old_to_update = self._resolve_conflict_with_existing(cand, obj, existing)
+                global_results.append((cand, new_obj, old_to_update))
+            else:
+                global_results.append((cand, obj, None))
+
+        # ---------- 5. 持久化 ----------
+        final_objects = []
+        for cand, new_obj, old_to_update in global_results:
+            if old_to_update:
+                # 先创建新记忆
+                created = self.repository.create(new_obj)
+                # 更新旧记忆
+                if old_to_update.superseded_by is None:
+                    # stale 情况
+                    old_to_update = old_to_update.model_copy(update={"updated_at": utc_now()})
+                    action = "stale"  # 或 "state_transition"
+                    reason = "旧记忆标记为 stale（偏好类或相似度低）"
+                else:
+                    old_to_update = old_to_update.model_copy(update={"superseded_by": created.id})
+                    action = "supersede"
+                    reason = "新记忆取代旧记忆（相似度高）"
+                self.repository.update_with_version(old_to_update)
+                final_objects.append(created)
+
+                # 记录审计
+                try:
+                    self.repository.append_audit_log(
+                        AuditLogEntry(
+                            timestamp=utc_now(),
+                            action=action,
+                            memory_id=old_to_update.id,
+                            reason=reason,
+                            source={"candidate": cand.raw_content, "actor": cand.origin_actor},
+                            payload={
+                                "old_status": old_to_update.status,  # 可能已变化，但我们在更新前记录？注意我们已经复制了
+                                "new_status": old_to_update.status,
+                                "new_memory_id": created.id,
+                                "similarity": None  # 可计算
+                            }
+                        )
+                    )
+                except Exception:
+                    pass
+            else:
+                created = self.repository.create(new_obj)
+                final_objects.append(created)
+
+        # 合并 correct 结果（已持久化）和全局结果
+        return corrected_results + final_objects
 
 
 # 模块级便捷函数

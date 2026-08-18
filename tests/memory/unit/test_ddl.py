@@ -2,11 +2,10 @@
 """T0.5 — DDL 测试：在内存 SQLite 中执行迁移脚本"""
 import sqlite3
 import pytest
-from pathlib import Path
+from lumneo.kernel.config.app_config import MIGRATIONS_DIR
 
-# 项目根目录向上查找
-project_root = Path(__file__).parent.parent.parent.parent
-migration_file = project_root / "migrations" / "migrate_v0.0_to_v1.0.sql"
+
+migration_file = MIGRATIONS_DIR / "migrate_v0.0_to_v1.0.sql"
 
 
 def test_ddl_executes_without_error():

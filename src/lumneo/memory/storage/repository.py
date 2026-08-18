@@ -2,16 +2,22 @@
 
 import sqlite3
 import json
+import uuid
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional, List, Dict, Any
 
-from ..model import MemoryObject, Evidence, Source, MemoryNeed, MemoryStatus
+from ..model import MemoryObject, Evidence, Source, PrivacyInfo, MemoryNeed, MemoryStatus
 from ..common.exceptions import PersistenceError, ValidationError, ConcurrentModificationError, NotFoundError
 from ..common.time import utc_now
 from ..common.id_gen import generate_evidence_id
 from .serializer import write_memory_object, read_memory_object, memory_to_path
+from lumneo.kernel.config.app_config import MIGRATIONS_DIR
+
+
+logger = logging.getLogger(__name__)
 
 
 # ========== 辅助结构（ADR-006 §3） ==========
@@ -125,7 +131,12 @@ class SQLiteMemoryRepository(MemoryRepository):
         self.db_path = db_path
         self.data_root = data_root
         self.conn = None
-        self._init_db()
+
+        try:
+            self._init_db()
+        except Exception:
+            self.close()
+            raise
 
     def _init_db(self):
         """初始化数据库连接，执行迁移。"""
@@ -133,15 +144,40 @@ class SQLiteMemoryRepository(MemoryRepository):
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
-        self.conn.execute("PRAGMA journal_mode = WAL")
+        # self.conn.execute("PRAGMA journal_mode = WAL")  # WAL 模式下，SQLite 会在内存中缓存数据，并在事务提交时将数据写入磁盘，从而提高并发性能。
         self._check_and_migrate()
+        self._create_audit_table()
         # 启动时自动执行一致性检查并修复
         report = self.check_consistency()
         if report.status != "healthy":
             # 自动重建全量索引
             self.rebuild_index()
-            # 记录日志（简化为打印）
-            print(f"[MemoryOS] 索引不一致，已自动重建。缺失: {len(report.missing_in_index)}, 孤儿: {len(report.orphan_in_index)}")
+            # 记录日志
+            logger.error(f"[MemoryOS] 索引不一致，已自动重建。缺失: {len(report.missing_in_index)}, 孤儿: {len(report.orphan_in_index)}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+    def _create_audit_table(self):
+        """创建审计日志表（如果不存在）"""
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                action TEXT NOT NULL,
+                memory_id TEXT,
+                reason TEXT,
+                source_json TEXT,
+                payload_json TEXT
+            )
+        """)
+        # 可选：创建索引以加速查询
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)")
+        self.conn.commit()
 
     def _check_and_migrate(self):
         """检查 schema 版本，执行 DDL。"""
@@ -159,7 +195,7 @@ class SQLiteMemoryRepository(MemoryRepository):
 
     def _execute_ddl(self):
         """执行完整 DDL 脚本。"""
-        migration_file = Path(__file__).parent.parent.parent.parent / "migrations" / "migrate_v0.0_to_v1.0.sql"
+        migration_file = MIGRATIONS_DIR / "migrate_v0.0_to_v1.0.sql"
         if not migration_file.exists():
             raise PersistenceError(f"迁移文件不存在: {migration_file}")
         with open(migration_file, 'r', encoding='utf-8') as f:
@@ -272,6 +308,20 @@ class SQLiteMemoryRepository(MemoryRepository):
 
         return memory
 
+    def find_active_by_subject_predicate(self, subject: str, predicate: str) -> List[MemoryObject]:
+        """查询所有 status='active' 且 subject 和 predicate 完全匹配的记忆。"""
+        cursor = self.conn.execute(
+            "SELECT id FROM memories WHERE subject = ? AND predicate = ? AND status = 'active'",
+            (subject, predicate)
+        )
+        ids = [row[0] for row in cursor.fetchall()]
+        result = []
+        for mid in ids:
+            obj = self.get_by_id(mid)
+            if obj is not None:
+                result.append(obj)
+        return result
+
     def _insert_memory(self, memory: MemoryObject):
         # 转换 source.timestamp
         source_dict = memory.source.model_dump(mode='json')
@@ -329,7 +379,109 @@ class SQLiteMemoryRepository(MemoryRepository):
 
     # ---------- 读操作（占位） ----------
     def get_by_id(self, memory_id: str) -> Optional[MemoryObject]:
-        raise NotImplementedError("get_by_id 将在 T5.4 后实现")
+        """根据 ID 读取记忆，优先从 SQLite 获取，若不存在则尝试从 Markdown 文件回退。"""
+        # 1. 从 SQLite 读取
+        cursor = self.conn.execute(
+            "SELECT * FROM memories WHERE id = ?", (memory_id,)
+        )
+        row = cursor.fetchone()
+        if row is None:
+            # 回退：尝试从文件系统读取
+            for layer_dir in self.data_root.iterdir():
+                if not layer_dir.is_dir() or layer_dir.name in ("governance", "index"):
+                    continue
+                md_path = layer_dir / f"{memory_id}.md"
+                if md_path.exists():
+                    try:
+                        return read_memory_object(md_path)
+                    except Exception as e:
+                        raise PersistenceError(f"从 Markdown 读取记忆 {memory_id} 失败: {e}")
+            return None
+
+        # 2. 从 SQLite 行构造 MemoryObject
+        try:
+            # 解析 JSON 字段
+            source_dict = json.loads(row['source_json'])
+            privacy_dict = json.loads(row['privacy_json']) if row['privacy_json'] else None
+            metadata_dict = json.loads(row['metadata_json']) if row['metadata_json'] else {}
+            tags_list = json.loads(row['tags_json']) if row['tags_json'] else []
+            condition_dict = json.loads(row['condition_json']) if row['condition_json'] else None
+
+            # 构造 Source
+            source = Source(
+                tenant_id=source_dict.get('tenant_id'),
+                agent_id=source_dict.get('agent_id'),
+                chat_id=source_dict.get('chat_id'),
+                message_id=source_dict.get('message_id'),
+                timestamp=datetime.fromisoformat(source_dict['timestamp']) if source_dict.get('timestamp') else utc_now(),
+                channel=source_dict.get('channel'),
+                extra=source_dict.get('extra')
+            )
+
+            # 构造 PrivacyInfo
+            privacy = PrivacyInfo(
+                level=privacy_dict['level'],
+                reason=privacy_dict.get('reason')
+            ) if privacy_dict else None
+
+            # 查询证据
+            ev_cursor = self.conn.execute(
+                "SELECT * FROM evidence WHERE memory_id = ?", (memory_id,)
+            )
+            evidence_list = []
+            for ev_row in ev_cursor.fetchall():
+                ev_source_dict = json.loads(ev_row['source_json'])
+                ev_source = Source(
+                    tenant_id=ev_source_dict.get('tenant_id'),
+                    agent_id=ev_source_dict.get('agent_id'),
+                    chat_id=ev_source_dict.get('chat_id'),
+                    message_id=ev_source_dict.get('message_id'),
+                    timestamp=datetime.fromisoformat(ev_source_dict['timestamp']) if ev_source_dict.get('timestamp') else utc_now(),
+                    channel=ev_source_dict.get('channel'),
+                    extra=ev_source_dict.get('extra')
+                )
+                evidence = Evidence(
+                    type=ev_row['type'],
+                    weight=ev_row['weight'],
+                    source=ev_source,
+                    observation=ev_row['observation'],
+                    origin_actor=ev_row['origin_actor'],
+                    created_at=datetime.fromisoformat(ev_row['created_at']),
+                    provenance_key=ev_row['provenance_key']
+                )
+                evidence_list.append(evidence)
+
+            # 构造 MemoryObject
+            memory = MemoryObject(
+                id=row['id'],
+                schema_version=row['schema_version'],
+                layer=row['layer'],
+                type=row['type'],
+                subject=row['subject'],
+                predicate=row['predicate'],
+                object=row['object'],
+                condition=condition_dict,
+                content=row['content'],
+                confidence=row['confidence'],
+                confidence_detail=None,  # Phase 1 未使用
+                importance=row['importance'],
+                status=row['status'],
+                evidence=evidence_list,
+                source=source,
+                origin=row['origin'],
+                supersedes=row['supersedes'],
+                superseded_by=row['superseded_by'],
+                last_accessed=datetime.fromisoformat(row['last_accessed']) if row['last_accessed'] else None,
+                access_count=row['access_count'],
+                tags=tags_list,
+                privacy=privacy,
+                created_at=datetime.fromisoformat(row['created_at']),
+                updated_at=datetime.fromisoformat(row['updated_at']),
+                metadata=metadata_dict
+            )
+            return memory
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            raise PersistenceError(f"反序列化记忆 {memory_id} 失败: {e}")
 
     def query_active(self, need: MemoryNeed, scope_filter: Optional[dict] = None) -> List[MemoryObject]:
         raise NotImplementedError("query_active 将在 T6 实现")
@@ -380,6 +532,20 @@ class SQLiteMemoryRepository(MemoryRepository):
                     # 如果找不到文件，则从索引中删除
                     self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
                     self.conn.commit()
+
+        try:
+            self.append_audit_log(
+                AuditLogEntry(
+                    timestamp=utc_now(),
+                    action="index_rebuild",
+                    memory_id=None,
+                    reason="索引重建（自动或手动）",
+                    source={"force_ids": force_ids},
+                    payload={"status": "completed"}
+                )
+            )
+        except Exception:
+            pass
 
         # 返回一致性报告（仅作参考）
         return self.check_consistency()
@@ -435,10 +601,64 @@ class SQLiteMemoryRepository(MemoryRepository):
 
     # ---------- 审计 ----------
     def append_audit_log(self, entry: AuditLogEntry) -> None:
-        raise NotImplementedError("审计将在 T4.5 实现")
+        """追加审计日志到文件系统和 SQLite，失败时降级为 warning"""
+        try:
+            # 生成审计事件 ID
+            timestamp_ns = int(entry.timestamp.timestamp() * 1e9)
+            rand_hex = uuid.uuid4().hex[:12]
+            audit_id = f"audit_{timestamp_ns}_{rand_hex}"
+            
+            # 序列化 entry
+            source_dict = entry.source if isinstance(entry.source, dict) else {}
+            payload_dict = entry.payload or {}
+            
+            # 准备记录
+            record = {
+                "id": audit_id,
+                "timestamp": entry.timestamp.isoformat(),
+                "action": entry.action,
+                "memory_id": entry.memory_id,
+                "reason": entry.reason,
+                "source": source_dict,
+                "payload": payload_dict,
+            }
+            
+            # 写入 JSONL 文件（每个事件一个文件）
+            month_dir = self.data_root / "governance" / "auto_actions" / entry.timestamp.strftime("%Y-%m")
+            month_dir.mkdir(parents=True, exist_ok=True)
+            file_path = month_dir / f"{audit_id}.jsonl"
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(record, f, ensure_ascii=False)
+                f.write("\n")  # 确保 JSONL 格式（虽然单行，但保留换行）
+            
+            # 写入 SQLite
+            self.conn.execute("""
+                INSERT INTO audit_logs (id, timestamp, action, memory_id, reason, source_json, payload_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                audit_id,
+                entry.timestamp.isoformat(),
+                entry.action,
+                entry.memory_id,
+                entry.reason,
+                json.dumps(source_dict, ensure_ascii=False),
+                json.dumps(payload_dict, ensure_ascii=False)
+            ))
+            self.conn.commit()
+        except Exception as e:
+            # 审计失败不阻塞主流程，仅记录警告
+            logger.warning(f"审计日志写入失败: {e}", exc_info=True)
 
     # ---------- 生命周期 ----------
     def close(self) -> None:
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+        conn = self.conn
+        self.conn = None
+
+        if conn is None:
+            return
+
+        try:
+            if conn.in_transaction:
+                conn.commit()
+        finally:
+            conn.close()

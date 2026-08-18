@@ -11,5 +11,6 @@ pandas>=3.0.5
 xlrd>=2.0.2
 chardet>=7.5.1
 markitdown[all]>=0.1.7
+rapidfuzz>=3.14.5
 requests>=2.34.2
 pyinstaller>=6.21.0

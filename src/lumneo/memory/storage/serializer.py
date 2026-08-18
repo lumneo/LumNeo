@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
-from ..model import MemoryObject
+from lumneo.memory.model import MemoryObject
 from lumneo.memory.common.time import parse_utc
 
 
