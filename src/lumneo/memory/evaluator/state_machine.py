@@ -255,7 +255,7 @@ class Evaluator:
             return new_obj, None
         old = existing[0]
 
-        # 1. Condition 交叉校验（不变）
+        # 1. Condition 交叉校验
         if _condition_conflict(candidate.condition, old.condition):
             updated_new = new_obj.model_copy(update={
                 "status": "needs_review",
@@ -263,7 +263,7 @@ class Evaluator:
             })
             return updated_new, None
 
-        # 2. generic_statement 特殊去重（不变）
+        # 2. generic_statement 特殊去重
         is_generic_new = candidate.predicate == "generic_statement" or new_obj.predicate == "generic_statement"
         is_generic_old = old.predicate == "generic_statement"
         if is_generic_new and is_generic_old and candidate.subject == old.subject:
@@ -283,13 +283,12 @@ class Evaluator:
                         new_obj.type in {"preference", "value", "decision"})
 
         if is_preference:
-            # 计算 object 相似度
-            sim = fuzz.ratio(candidate.object or "", old.object or "") / 100.0
+            # 偏好类：不建立版本链，旧记忆标记为 stale（仅当相似度高时）
             if sim <= 0.40:
                 # 对象完全不同，视为独立偏好，不覆盖旧记忆
                 return new_obj, None
             elif sim >= 0.75:
-                # 对象高度相似，标记旧记忆为 stale（偏好类更倾向 stale 而非 supersede）
+                # 对象高度相似，标记旧记忆为 stale
                 old_updated = old.model_copy(update={
                     "status": "stale",
                     "updated_at": datetime.now(timezone.utc)
@@ -307,6 +306,36 @@ class Evaluator:
                     }
                 })
                 return new_updated, None
+
+        # ---------- 5. 非偏好类常规逻辑 ----------
+        if sim >= 0.75:
+            # 高度相似 -> supersede
+            new_updated = new_obj.model_copy(update={
+                "status": "active",
+                "supersedes": old.id,
+                "metadata": {**new_obj.metadata, "superseded_old_id": old.id}
+            })
+            old_updated = old.model_copy(update={
+                "status": "superseded",
+                "superseded_by": new_obj.id,
+                "updated_at": datetime.now(timezone.utc)
+            })
+            return new_updated, old_updated
+        elif sim <= 0.40:
+            # 明显不同 -> 独立
+            return new_obj, None
+        else:
+            # 无法安全判断 -> needs_review
+            new_updated = new_obj.model_copy(update={
+                "status": "needs_review",
+                "metadata": {
+                    **new_obj.metadata,
+                    "conflict_reason": "similarity_unclear",
+                    "conflict_with": old.id,
+                    "similarity_score": sim,
+                }
+            })
+            return new_updated, None
     
     def _batch_conflict_detection(
         self,
