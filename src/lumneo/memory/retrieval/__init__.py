@@ -1,6 +1,6 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Dict, Optional
+from typing import List
 from lumneo.memory.model import MemoryNeed, MemoryObject, MemoryStatus
 from lumneo.memory.storage.repository import MemoryRepository
 from lumneo.memory.retrieval.ranking import compute_scores
@@ -20,6 +20,8 @@ def retrieve(
     默认只返回 active 记忆；若 need.include_historical=True，则返回所有状态（active, superseded, stale, archived）。
     副作用：异步更新返回记忆的 last_accessed 和 access_count。
     """
+    # 若 need.scope_filter 为 None，视为无限制（测试环境允许）
+    # 生产环境应确保调用方传入 scope
     # ---------- 1. 获取记忆（scope 过滤由 repository 负责） ----------
     if need.include_historical:
         # 允许查询 active, superseded, stale, archived
@@ -34,7 +36,7 @@ def retrieve(
                     memories.append(mem)
         # 如果超过 max_results，按 final_score 最终截断（后续会排序）
     else:
-        memories = repository.query_active(need)
+        memories = repository.query_active(need, scope_filter=need.scope_filter)
 
     if not memories:
         return []

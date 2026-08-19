@@ -139,7 +139,8 @@ class LLMCaptureProvider(CaptureProvider):
 
     def _extract_preference(self, text: str) -> List[Tuple[str, str, str, str, str]]:
         results = []
-        match = re.search(r"(?:我)?(?:喜欢|偏好|爱|prefer|likes)\s*(.+)$", text, re.IGNORECASE)
+        # 支持任意主语（包括 "A喜欢安静"）
+        match = re.search(r"(?:.*?)(?:喜欢|偏好|爱|prefer|likes)\s*(.+)$", text, re.IGNORECASE)
         if match:
             obj = match.group(1).strip()
             for item in self._split_compound(obj):
@@ -207,6 +208,7 @@ class LLMCaptureProvider(CaptureProvider):
         standardization_issue: bool = False,
         confidence_hint: Optional[float] = None,
         provenance_key: Optional[str] = None,
+        capture_id: Optional[str] = None,
     ) -> MemoryCandidate:
         """
         构建 MemoryCandidate，证据中的 origin_actor 和 provenance_key 由外部传入。
@@ -253,7 +255,7 @@ class LLMCaptureProvider(CaptureProvider):
             source=source,
             origin_actor=origin_actor,          # 候选级也记录
             confidence_hint=confidence_hint,
-            capture_id="pending",
+            capture_id=capture_id or "pending",  # 调用方会覆盖，留作占位
             dedup_key=None,
             metadata=metadata,
         )

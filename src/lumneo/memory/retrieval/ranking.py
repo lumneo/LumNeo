@@ -13,12 +13,16 @@ def compute_bm25_relevance(
 
     placeholders = ','.join(['?'] * len(memory_ids))
     sql = f"""
-        SELECT m.id, COALESCE(bm25(memories_fts), 0.0) as raw_bm25
+        WITH matched AS (
+            SELECT rowid, bm25(memories_fts) as score
+            FROM memories_fts
+            WHERE memories_fts MATCH ?
+        )
+        SELECT m.id, COALESCE(matched.score, 0.0) as raw_bm25
         FROM memories m
-        LEFT JOIN memories_fts ON m.rowid = memories_fts.rowid AND memories_fts MATCH ?
+        LEFT JOIN matched ON m.rowid = matched.rowid
         WHERE m.id IN ({placeholders})
     """
-    # 注意参数顺序：先 MATCH 的 query_str，再是 ID 列表
     params = [query_str] + memory_ids
     cursor = conn.execute(sql, params)
     rows = cursor.fetchall()
@@ -31,7 +35,6 @@ def compute_bm25_relevance(
         relevance = bm25_strength / (bm25_strength + 0.5) if bm25_strength > 0 else 0.0
         result[memory_id] = relevance
 
-    # 确保所有 ID 都在结果中（理论上 LEFT JOIN 已经包含了所有）
     for mid in memory_ids:
         if mid not in result:
             result[mid] = 0.0

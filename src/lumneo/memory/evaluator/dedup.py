@@ -11,8 +11,8 @@ from lumneo.memory.model.auxiliary import Source
 
 
 # 配置：同一 chat_id 内，消息间隔小于此秒数视为「≤5轮」的近似
-# 默认为 300 秒（5分钟），可根据实际对话节奏调整
-REPLICATION_WINDOW_SECONDS = 300
+# Phase 1A: 用时间窗口近似"≤5轮"（假设对话节奏平均 12 秒/轮，5轮约 60 秒）
+REPLICATION_WINDOW_SECONDS = 60
 
 
 def _get_message_id(evidence: Evidence) -> Optional[str]:

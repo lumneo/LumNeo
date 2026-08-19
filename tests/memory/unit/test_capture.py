@@ -131,6 +131,6 @@ def test_provider_exception():
 
 def test_default_provider_import_error():
     """当未提供 provider 且默认 LLM Provider 不可用时，应抛出 ImportError"""
-    with patch("backend.memory.capture._get_default_provider", side_effect=ImportError("No provider")):
+    with patch("lumneo.memory.capture._get_default_provider", side_effect=ImportError("No provider")):
         with pytest.raises(ImportError):
             capture([create_turn()])

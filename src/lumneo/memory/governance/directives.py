@@ -3,30 +3,12 @@
 用户指令处理（Contract §4, §5.4）
 提供 apply_user_directives 函数，处理 forget, correct 等指令。
 """
+from typing import List, Optional
 
-from datetime import datetime, timezone
-from typing import List, Optional, Literal, Dict, Any
-from dataclasses import dataclass
-
-from lumneo.memory.model import MemoryObject, MemoryStatus
+from lumneo.memory.model import UserDirective
 from lumneo.memory.storage.repository import MemoryRepository, AuditLogEntry
 from lumneo.memory.common.time import utc_now
 from lumneo.memory.common.exceptions import ValidationError, NotFoundError
-
-
-@dataclass
-class UserDirective:
-    """用户指令结构（与契约保持一致）"""
-    type: Literal["forget", "do_not_remember", "temporary", "correct"]
-    target: Optional[str] = None          # 记忆 id 或描述性文本
-    target_type: Optional[Literal["memory_id", "semantic_match", "predicate_match"]] = None
-    scope: Optional[str] = None           # 可选：layer / type / keyword
-    raw_text: str = ""
-    created_at: datetime = None
-
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = utc_now()
 
 
 def apply_user_directives(
