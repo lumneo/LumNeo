@@ -105,18 +105,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     tokenize='porter unicode61'
 );
 
--- 创建 FTS5 虚拟表（外部内容模式）
-CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-    content,
-    subject,
-    predicate,
-    object,
-    tags,
-    content='memories',
-    content_rowid='rowid',
-    tokenize='porter unicode61'
-);
-
 -- 触发器：保持 FTS5 与主表同步
 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
     INSERT INTO memories_fts(rowid, content, subject, predicate, object, tags)

@@ -1,5 +1,6 @@
 aiofiles>=25.1.0
 fastapi>=0.141.1
+jieba>=0.42.1
 uvicorn[standard]>=0.52.1
 pywebview>=6.2.1
 openai>=2.53.0

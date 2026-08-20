@@ -26,10 +26,10 @@ class TestAnalyzeIntent:
         # 偏好查询
         ("我喜欢什么", False, None, ["preference"]),
         ("我的偏好", False, None, ["preference"]),
-        # 混合：身份+偏好
-        ("我的偏好是什么", False, ["identity"], ["preference"]),
+        # 偏好问题不应误加 identity 硬过滤
+        ("我的偏好是什么", False, None, ["preference"]),
         # 历史+纠正
-        ("之前我说过喜欢咖啡，现在纠正一下", True, None, ["preference"]),
+        ("之前我说过喜欢咖啡，现在纠正一下", True, None, None),
     ])
     def test_intent_classification(self, query, expected_historical,
                                    expected_layers, expected_types):
@@ -43,10 +43,18 @@ class TestAnalyzeIntent:
             assert set(need.types or []) == set(expected_types)
         else:
             assert need.types is None or need.types == []
-        # 关键词应包含原查询
+        # keywords 是用于召回的提取词，不要求复制原始整句。
         assert need.keywords is not None
-        assert query in need.keywords
         # 其他字段为默认值
         assert need.max_results == 20
         assert need.scope_filter is None
         assert need.subject_hint is None
+
+    def test_mixed_identity_and_preference_does_not_apply_and_filter(self):
+        need = analyze_intent("我是什么人，是不是软件工程师，喜欢什么咖啡")
+
+        assert need.layers == []
+        assert need.types == []
+        assert "人" in need.keywords
+        assert "喜欢" in need.keywords
+        assert "咖啡" in need.keywords

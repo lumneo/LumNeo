@@ -4,7 +4,9 @@ import sqlite3
 import json
 import uuid
 import logging
+import threading
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional, List, Dict, Any
@@ -115,6 +117,25 @@ class MemoryRepository(ABC):
         ...
 
     @abstractmethod
+    def search_candidates(
+        self,
+        need: MemoryNeed,
+        statuses: Optional[List[MemoryStatus]] = None,
+        limit: int = 100,
+    ) -> List[MemoryObject]:
+        """检索候选记忆，支持多种过滤条件"""
+        ...
+
+    @abstractmethod
+    def get_relevance_scores(
+        self,
+        memory_ids: List[str],
+        query: str,
+    ) -> Dict[str, float]:
+        """计算 BM25 相关性分数"""
+        ...
+
+    @abstractmethod
     def record_access(self, memory_id: str) -> None:
         """异步更新记忆的 last_accessed 和 access_count（仅限检索副作用）。"""
         ...
@@ -136,6 +157,12 @@ class SQLiteMemoryRepository(MemoryRepository):
         self.db_path = db_path
         self.data_root = data_root
         self.conn = None
+        self._lifecycle_lock = threading.Lock()
+        self._closing = False
+        self._access_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="lumneo-memory-access",
+        )
 
         try:
             self._init_db()
@@ -491,94 +518,6 @@ class SQLiteMemoryRepository(MemoryRepository):
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             raise PersistenceError(f"反序列化记忆 {memory_id} 失败: {e}")
 
-    def query_active(
-        self,
-        need: MemoryNeed,
-        scope_filter: Optional[dict] = None
-    ) -> List[MemoryObject]:
-        """
-        检索 active 状态记忆，强制 Scope 过滤。
-        scope_filter 优先于 need.scope_filter。
-        """
-        # 合并 scope 过滤条件
-        scope = scope_filter or need.scope_filter or {}
-        tenant_id = scope.get('tenant_id')
-        agent_id = scope.get('agent_id')
-
-        sql = "SELECT * FROM memories WHERE status = 'active'"
-        params = []
-
-        if tenant_id:
-            sql += " AND json_extract(source_json, '$.tenant_id') = ?"
-            params.append(tenant_id)
-        if agent_id:
-            sql += " AND json_extract(source_json, '$.agent_id') = ?"
-            params.append(agent_id)
-
-        # Layer 过滤
-        if need.layers:
-            placeholders = ','.join(['?'] * len(need.layers))
-            sql += f" AND layer IN ({placeholders})"
-            params.extend(need.layers)
-
-        # Type 过滤
-        if need.types:
-            placeholders = ','.join(['?'] * len(need.types))
-            sql += f" AND type IN ({placeholders})"
-            params.extend(need.types)
-
-        # FTS5 全文搜索
-        if need.keywords:
-            # 将关键词列表合并为一个查询字符串（空格分隔，FTS5 会分词）
-            query_str = ' '.join(need.keywords)
-            sql += " AND rowid IN (SELECT rowid FROM memories_fts WHERE content MATCH ?)"
-            params.append(query_str)
-
-        # 限制结果数量
-        if need.max_results:
-            sql += f" LIMIT {need.max_results}"
-
-        cursor = self.conn.execute(sql, params)
-        rows = cursor.fetchall()
-
-        result = []
-        for row in rows:
-            result.append(self._row_to_memory(row))
-        return result
-
-    def query_by_status(
-        self,
-        status: MemoryStatus,
-        scope_filter: Optional[dict] = None,
-        limit: int = 100
-    ) -> List[MemoryObject]:
-        """
-        按状态批量查询，强制 Scope 过滤。
-        """
-        scope = scope_filter or {}
-        tenant_id = scope.get('tenant_id')
-        agent_id = scope.get('agent_id')
-
-        sql = "SELECT * FROM memories WHERE status = ?"
-        params = [status]
-
-        if tenant_id:
-            sql += " AND json_extract(source_json, '$.tenant_id') = ?"
-            params.append(tenant_id)
-        if agent_id:
-            sql += " AND json_extract(source_json, '$.agent_id') = ?"
-            params.append(agent_id)
-
-        sql += f" LIMIT {limit}"
-
-        cursor = self.conn.execute(sql, params)
-        rows = cursor.fetchall()
-
-        result = []
-        for row in rows:
-            result.append(self._row_to_memory(row))
-        return result
-
     # ---------- 索引与一致性 ----------
     def rebuild_index(self, force_ids: Optional[List[str]] = None) -> ConsistencyReport:
         """重建 FTS5 索引。若 force_ids 为空则全量重建，否则只重建指定 ID。"""
@@ -641,13 +580,209 @@ class SQLiteMemoryRepository(MemoryRepository):
         return self.check_consistency()
 
     def record_access(self, memory_id: str) -> None:
-        """异步更新 last_accessed 和 access_count（仅限检索副作用）。"""
-        now = utc_now()
-        self.conn.execute(
-            "UPDATE memories SET last_accessed = ?, access_count = access_count + 1 WHERE id = ?",
-            (now.isoformat(), memory_id)
+        """将访问统计加入 Repository 自己的后台队列。"""
+        with self._lifecycle_lock:
+            if self._closing:
+                return
+            future = self._access_executor.submit(self._record_access_sync, memory_id)
+            future.add_done_callback(self._log_access_error)
+
+    @staticmethod
+    def _log_access_error(future) -> None:
+        try:
+            future.result()
+        except Exception:
+            logger.warning("访问统计后台更新失败", exc_info=True)
+
+    def _record_access_sync(self, memory_id: str) -> None:
+        """使用独立连接刷新遥测，避免复用检索事务的 SQLite 连接。"""
+        conn = sqlite3.connect(str(self.db_path))
+        try:
+            conn.execute(
+                "UPDATE memories "
+                "SET last_accessed = ?, access_count = access_count + 1 "
+                "WHERE id = ?",
+                (utc_now().isoformat(), memory_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def search_candidates(
+        self,
+        need: MemoryNeed,
+        statuses: Optional[List[MemoryStatus]] = None,
+        limit: int = 100,
+    ) -> List[MemoryObject]:
+        """
+        Candidate Recall
+
+        Phase 1A:
+        - status 是硬过滤
+        - scope 是硬过滤
+        - layer/type 是弱约束
+        - keyword 不作为硬过滤
+
+        防止：
+        中文 FTS 失败导致 Recall=0
+        """
+        statuses = statuses or ["active"]
+
+        placeholders = ",".join(["?"] * len(statuses))
+
+        sql = f"""
+            SELECT m.*
+            FROM memories m
+            WHERE m.status IN ({placeholders})
+        """
+
+        params = list(statuses)
+
+        # ------------------------------
+        # scope filter
+        # ------------------------------
+        scope = need.scope_filter or {}
+        tenant_id = scope.get("tenant_id")
+        agent_id = scope.get("agent_id")
+
+        if tenant_id:
+            sql += """
+                AND json_extract(
+                    m.source_json,
+                    '$.tenant_id'
+                ) = ?
+            """
+            params.append(tenant_id)
+
+        if agent_id:
+            sql += """
+                AND json_extract(
+                    m.source_json,
+                    '$.agent_id'
+                ) = ?
+            """
+            params.append(agent_id)
+
+        # ------------------------------
+        # layer
+        # ------------------------------
+        if need.layers:
+            layer_placeholders = ",".join(["?"] * len(need.layers))
+            sql += f"""
+                AND m.layer IN ({layer_placeholders})
+            """
+            params.extend(need.layers)
+
+        # ------------------------------
+        # type
+        # ------------------------------
+        if need.types:
+            type_placeholders = ",".join(["?"] * len(need.types))
+            sql += f"""
+                AND m.type IN ({type_placeholders})
+            """
+            params.extend(need.types)
+
+        # 注意：
+        # 不再使用：
+        # AND memories_fts MATCH ?
+        # keyword 交给 ranking
+
+        sql += """
+            ORDER BY
+                m.importance DESC,
+                m.confidence DESC,
+                m.created_at DESC
+            LIMIT ?
+        """
+
+        params.append(limit)
+
+        cursor = self.conn.execute(sql, params)
+        rows = cursor.fetchall()
+
+        return [self._row_to_memory(row) for row in rows]
+
+    def get_relevance_scores(
+        self,
+        memory_ids: List[str],
+        query: str,
+    ) -> Dict[str, float]:
+        """按 Contract §5.2 将 SQLite FTS5 BM25 映射到 ``[0, 1)``。"""
+        scores = {mid: 0.0 for mid in memory_ids}
+        if not memory_ids or not query or not query.strip():
+            return scores
+
+        raw_query = query.strip()
+        compact_query = "".join(raw_query.split())
+
+        try:
+            import jieba
+            segmented_terms = [
+                term.strip() for term in jieba.lcut(raw_query) if term.strip()
+            ]
+        except Exception:
+            segmented_terms = raw_query.split()
+
+        stop = {"我", "的", "什么", "用户", "喜欢", "会", "吗", "呢"}
+        terms = list(dict.fromkeys(
+            term
+            for term in [compact_query, *segmented_terms]
+            if term and term not in stop
+        ))
+        if not terms:
+            return scores
+
+        # ADR-007 固定 unicode61；对中文而言，一整段连续汉字可能成为单个
+        # FTS token。将命中查询片段的已索引字段扩展成完整 phrase，避免把
+        # BM25 旁路成 Python 子串分数，同时保持中文召回。
+        placeholders = ",".join(["?"] * len(memory_ids))
+        expansion_sql = f"""
+            SELECT content, subject, predicate, object, tags_json
+            FROM memories
+            WHERE id IN ({placeholders})
+        """
+        expanded_terms = list(terms)
+        for row in self.conn.execute(expansion_sql, memory_ids).fetchall():
+            for field in ("content", "subject", "predicate", "object", "tags_json"):
+                value = (row[field] or "").strip()
+                if value and any(term in value for term in terms):
+                    expanded_terms.append(value)
+        terms = list(dict.fromkeys(expanded_terms))
+
+        # unicode61 不会按中文词边界切分，因此同时保留紧凑原词并使用
+        # FTS5 prefix phrase；仍由 bm25() 负责相关性，不做旁路子串打分。
+        fts_query = " OR ".join(
+            f'"{term.replace(chr(34), chr(34) * 2)}"*'
+            for term in terms
         )
-        self.conn.commit()
+        sql = f"""
+            SELECT m.id, bm25(memories_fts) AS bm25_score
+            FROM memories_fts
+            JOIN memories m ON m.rowid = memories_fts.rowid
+            WHERE memories_fts MATCH ?
+              AND m.id IN ({placeholders})
+        """
+
+        for row in self.conn.execute(sql, [fts_query, *memory_ids]).fetchall():
+            bm25_strength = max(0.0, -float(row["bm25_score"]))
+            scores[row["id"]] = bm25_strength / (bm25_strength + 0.5)
+
+        return scores
+
+    # 重构 query_active 和 query_by_status 以调用 search_candidates（可选）
+    def query_active(self, need: MemoryNeed, scope_filter: Optional[dict] = None) -> List[MemoryObject]:
+        # 将 scope_filter 合并到 need（暂时修改 need 对象，但不建议）
+        # 更好的方式：复制 need 并更新 scope_filter
+        need_copy = need.copy(deep=True)
+        need_copy.scope_filter = scope_filter or need_copy.scope_filter
+        return self.search_candidates(need_copy, statuses=["active"], limit=need.max_results or 100)
+
+    def query_by_status(self, status: MemoryStatus, scope_filter: Optional[dict] = None, limit: int = 100) -> List[MemoryObject]:
+        # 仅按状态查询，无关键词过滤（保留原行为）
+        # 构造一个简单的 need 只包含 scope_filter
+        need = MemoryNeed(scope_filter=scope_filter, keywords=None)
+        return self.search_candidates(need, statuses=[status], limit=limit)
     
     def check_consistency(self) -> ConsistencyReport:
         """遍历 Markdown SoT，与 SQLite 比对，返回一致性报告。"""
@@ -750,6 +885,14 @@ class SQLiteMemoryRepository(MemoryRepository):
 
     # ---------- 生命周期 ----------
     def close(self) -> None:
+        with self._lifecycle_lock:
+            if self._closing:
+                return
+            self._closing = True
+
+        # 先排空 Repository 的访问统计队列，再关闭主连接，避免 teardown 竞态。
+        self._access_executor.shutdown(wait=True)
+
         conn = self.conn
         self.conn = None
 
