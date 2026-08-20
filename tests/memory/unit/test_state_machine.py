@@ -4,7 +4,8 @@ from lumneo.memory.model.memory_candidate import MemoryCandidate
 from lumneo.memory.model.evidence import Evidence, EvidenceType, EvidenceActor
 from lumneo.memory.model.auxiliary import Source
 from lumneo.memory.model.enums import MemoryLayer, MemoryType
-from lumneo.memory.evaluator.state_machine import Evaluator, evaluate, evaluate_batch
+from lumneo.memory.evaluator.state_machine import Evaluator
+from lumneo.memory.storage.repository import SQLiteMemoryRepository
 
 
 def create_evidence(
@@ -65,6 +66,15 @@ def make_candidate(
     )
 
 
+@pytest.fixture
+def persistent_evaluator(tmp_path):
+    repository = SQLiteMemoryRepository(tmp_path / "memory.db", tmp_path / "memory")
+    try:
+        yield Evaluator(repository=repository)
+    finally:
+        repository.close()
+
+
 class TestEvaluator:
     def test_layer_type_suspicious_goes_needs_review(self):
         cand = make_candidate("test", layer="identity", mem_type="event")
@@ -87,42 +97,42 @@ class TestEvaluator:
         assert obj.status == "needs_review"
         assert obj.confidence == 0.5
 
-    def test_batch_conflict_high_similarity_supersede(self):
+    def test_batch_high_similarity_is_not_a_conflict(self, persistent_evaluator):
         cand1 = make_candidate("like coffee", subject="user", predicate="likes", object="coffee", capture_id="c1")
         cand2 = make_candidate("like tea", subject="user", predicate="likes", object="coffee", capture_id="c1")
         # 二者对象高度相似（相同）
-        objs = evaluate_batch([cand1, cand2])
-        # 第一个 active，第二个 active 并 supersedes 第一个
-        assert objs[0].status == "superseded"
-        assert objs[0].superseded_by == objs[1].id
-        assert objs[1].status == "active"
-        assert objs[1].supersedes == objs[0].id
+        objs = persistent_evaluator.evaluate_batch([cand1, cand2])
+        # Contract §5.3：同 capture 仅互斥 object 进入 needs_review。
+        assert all(obj.status == "active" for obj in objs)
+        assert all(obj.supersedes is None for obj in objs)
+        assert all(obj.superseded_by is None for obj in objs)
 
-    def test_batch_conflict_low_similarity_independent(self):
+    def test_batch_conflict_low_similarity_independent(self, persistent_evaluator):
         cand1 = make_candidate("like coffee", subject="user", predicate="likes", object="coffee", capture_id="c1")
         cand2 = make_candidate("like tea", subject="user", predicate="likes", object="tea", capture_id="c1")
         # 对象不同，sim 低
-        objs = evaluate_batch([cand1, cand2])
-        # 两个都 active（假设置信度够）
-        assert objs[0].status == "active"
-        assert objs[1].status == "active"
-        assert objs[0].superseded_by is None
-        assert objs[1].supersedes is None
+        objs = persistent_evaluator.evaluate_batch([cand1, cand2])
+        by_object = {obj.object: obj for obj in objs}
+        assert by_object["coffee"].status == "active"
+        assert by_object["tea"].status == "needs_review"
+        assert by_object["tea"].metadata.get("batch_conflict") is True
 
-    def test_batch_conflict_unclear_goes_needs_review(self):
+    def test_batch_conflict_unclear_goes_needs_review(self, persistent_evaluator):
         # 对象相似度介于 0.4-0.75 之间，我们构造：object = "coffee" vs "coffee beans"
         cand1 = make_candidate("like coffee", subject="user", predicate="likes", object="coffee", capture_id="c1")
         cand2 = make_candidate("like coffee beans", subject="user", predicate="likes", object="coffee beans", capture_id="c1")
         # 相似度大概 0.5~0.6
-        objs = evaluate_batch([cand1, cand2])
-        assert objs[1].status == "needs_review"
-        assert objs[1].metadata.get("conflict_unclear") is True
+        objs = persistent_evaluator.evaluate_batch([cand1, cand2])
+        by_object = {obj.object: obj for obj in objs}
+        assert by_object["coffee"].status == "active"
+        assert by_object["coffee beans"].status == "needs_review"
+        assert by_object["coffee beans"].metadata.get("batch_conflict") is True
 
-    def test_batch_suspicious_not_supersede(self):
+    def test_batch_suspicious_not_supersede(self, persistent_evaluator):
         cand1 = make_candidate("like coffee", layer="identity", mem_type="event", subject="user", predicate="likes", object="coffee", capture_id="c1")
         cand2 = make_candidate("like tea", layer="identity", mem_type="event", subject="user", predicate="likes", object="coffee", capture_id="c1")
         # 两个都是 suspicious，不会 active
-        objs = evaluate_batch([cand1, cand2])
+        objs = persistent_evaluator.evaluate_batch([cand1, cand2])
         for obj in objs:
             assert obj.status == "needs_review"
             assert obj.metadata["layer_type_verdict"] == "suspicious"

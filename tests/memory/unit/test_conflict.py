@@ -180,8 +180,8 @@ def test_conflict_generic_statement_similar(repo_and_evaluator):
     assert obj.metadata.get("conflict_reason") == "generic_statement_conflict"
 
 
-def test_conflict_preference_stale_old(repo_and_evaluator):
-    """preference 类型 → 旧记忆标记 stale，新记忆 active"""
+def test_conflict_preference_low_similarity_is_independent(repo_and_evaluator):
+    """preference 且相似度 ≤0.40 → 两条记忆独立保持 active。"""
     repo, evaluator = repo_and_evaluator
 
     # 已有记忆：type="preference", object="美式咖啡"
@@ -207,9 +207,9 @@ def test_conflict_preference_stale_old(repo_and_evaluator):
     assert obj.status == "active"
     assert obj.supersedes is None  # 不建立版本链
 
-    # 检查旧记忆是否变为 stale
+    # Contract §5.3：明显不同的偏好作为独立记忆写入。
     updated_old = repo.get_by_id(old.id)
-    assert updated_old.status == "stale"
+    assert updated_old.status == "active"
 
 
 def test_conflict_supersede_high_similarity(repo_and_evaluator):
@@ -241,7 +241,7 @@ def test_conflict_supersede_high_similarity(repo_and_evaluator):
     assert old_after.superseded_by == obj.id
 
 
-def test_conflict_independent_low_similarity(repo_and_evaluator):
+def test_conflict_preference_low_similarity_keeps_old_active(repo_and_evaluator):
     """相似度 ≤0.40 → 独立写入，旧记忆保持 active"""
     repo, evaluator = repo_and_evaluator
 
@@ -298,7 +298,7 @@ def test_conflict_independent_low_similarity(repo_and_evaluator):
     assert obj.supersedes is None
 
     old_after = repo.get_by_id(old.id)
-    assert old_after.status == "stale"   # 改为 stale
+    assert old_after.status == "active"
 
 def test_batch_conflict_same_subject_predicate_different_object(repo_and_evaluator):
     """同 capture_id 内同 subject+predicate 但 object 不同 → 后置候选 needs_review"""

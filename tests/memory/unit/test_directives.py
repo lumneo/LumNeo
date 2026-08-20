@@ -1,5 +1,6 @@
 # tests/memory/unit/test_directives.py
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 import gc
 import time
 import tempfile
@@ -11,7 +12,6 @@ from lumneo.memory.storage.repository import SQLiteMemoryRepository
 from lumneo.memory.model import MemoryObject, MemoryCandidate, Evidence, Source
 from lumneo.memory.common.time import utc_now
 from lumneo.memory.common.id_gen import generate_memory_id
-from lumneo.memory.common.exceptions import ValidationError
 from lumneo.memory.evaluator.state_machine import Evaluator
 
 
@@ -63,7 +63,8 @@ def test_forget_by_memory_id():
                 type="forget",
                 target=memory.id,
                 target_type="memory_id",
-                raw_text="忘记这条记忆"
+                raw_text="忘记这条记忆",
+                created_at=utc_now(),
             )
             apply_user_directives([directive], repo)
 
@@ -90,7 +91,8 @@ def test_forget_non_existent_memory():
                 type="forget",
                 target="non_existent_id",
                 target_type="memory_id",
-                raw_text="忘记不存在的记忆"
+                raw_text="忘记不存在的记忆",
+                created_at=utc_now(),
             )
             apply_user_directives([directive], repo)
         finally:
@@ -110,7 +112,8 @@ def test_forget_unsupported_target_type():
                 type="forget",
                 target="某个语义描述",
                 target_type="semantic_match",
-                raw_text="忘记语义匹配的记忆"
+                raw_text="忘记语义匹配的记忆",
+                created_at=utc_now(),
             )
             with pytest.raises(NotImplementedError):
                 apply_user_directives([directive], repo)
@@ -126,14 +129,14 @@ def test_forget_missing_target():
         db_path = data_root / "index" / "fts5.db"
         with SQLiteMemoryRepository(db_path, data_root) as repo:
             try:
-                directive = UserDirective(
-                    type="forget",
-                    target=None,
-                    target_type="memory_id",
-                    raw_text="忘记未指定目标的记忆"
-                )
-                with pytest.raises(ValidationError):
-                    apply_user_directives([directive], repo)
+                with pytest.raises(PydanticValidationError):
+                    UserDirective(
+                        type="forget",
+                        target=None,
+                        target_type="memory_id",
+                        raw_text="忘记未指定目标的记忆",
+                        created_at=utc_now(),
+                    )
             finally:
                 repo.close()
                 gc.collect()
@@ -199,7 +202,8 @@ def test_correct_instruction():
                 type="correct",
                 target=old_memory.id,
                 target_type="memory_id",
-                raw_text="纠正为拿铁"
+                raw_text="纠正为拿铁",
+                created_at=utc_now(),
             )
 
             # 4. 创建 Evaluator，传入 repository
@@ -239,7 +243,8 @@ def test_forget_audit_log():
                 type="forget",
                 target=memory.id,
                 target_type="memory_id",
-                raw_text="忘记这条记忆"
+                raw_text="忘记这条记忆",
+                created_at=utc_now(),
             )
             apply_user_directives([directive], repo)
 

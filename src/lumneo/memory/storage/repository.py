@@ -521,6 +521,59 @@ class SQLiteMemoryRepository(MemoryRepository):
     # ---------- 索引与一致性 ----------
     def rebuild_index(self, force_ids: Optional[List[str]] = None) -> ConsistencyReport:
         """重建 FTS5 索引。若 force_ids 为空则全量重建，否则只重建指定 ID。"""
+        markdown_memories = []
+        if force_ids is None:
+            # 删除派生表前先完整解析 Markdown；任一 SoT 文件损坏时不触碰
+            # 当前索引。版本链可能双向引用，须两阶段恢复以避免插入顺序导致
+            # FOREIGN KEY 失败。
+            for layer_dir in self.data_root.iterdir():
+                if not layer_dir.is_dir() or layer_dir.name in ("governance", "index"):
+                    continue
+                for md_file in layer_dir.glob("*.md"):
+                    try:
+                        markdown_memories.append(read_memory_object(md_file))
+                    except Exception as e:
+                        raise PersistenceError(f"重建索引失败: {md_file} - {e}")
+
+        # external-content FTS 的词项若已缺失，直接 DELETE memories 会触发
+        # memories_ad 再删一次同一词项，并由 SQLite 报 "database disk image is
+        # malformed"。DDL 中 FTS 列名 tags 与 content table 的 tags_json 不同，
+        # 因而 FTS5 内建 rebuild 命令不可用；按冻结 DDL 重建派生表及触发器，
+        # 再从主表显式回填实际列映射。
+        self.conn.executescript("""
+            DROP TRIGGER IF EXISTS memories_ai;
+            DROP TRIGGER IF EXISTS memories_ad;
+            DROP TRIGGER IF EXISTS memories_au;
+            DROP TABLE IF EXISTS memories_fts;
+            CREATE VIRTUAL TABLE memories_fts USING fts5(
+                content,
+                subject,
+                predicate,
+                object,
+                tags,
+                content='memories',
+                content_rowid='rowid',
+                tokenize='porter unicode61'
+            );
+            INSERT INTO memories_fts(rowid, content, subject, predicate, object, tags)
+            SELECT rowid, content, subject, predicate, object, tags_json FROM memories;
+            CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
+                INSERT INTO memories_fts(rowid, content, subject, predicate, object, tags)
+                VALUES (new.rowid, new.content, new.subject, new.predicate, new.object, new.tags_json);
+            END;
+            CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
+                INSERT INTO memories_fts(memories_fts, rowid, content, subject, predicate, object, tags)
+                VALUES ('delete', old.rowid, old.content, old.subject, old.predicate, old.object, old.tags_json);
+            END;
+            CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
+                INSERT INTO memories_fts(memories_fts, rowid, content, subject, predicate, object, tags)
+                VALUES ('delete', old.rowid, old.content, old.subject, old.predicate, old.object, old.tags_json);
+                INSERT INTO memories_fts(rowid, content, subject, predicate, object, tags)
+                VALUES (new.rowid, new.content, new.subject, new.predicate, new.object, new.tags_json);
+            END;
+        """)
+        self.conn.commit()
+
         # 如果 force_ids 为 None，全量重建
         if force_ids is None:
             # 清空 memories 表（级联删除 evidence，FTS5 触发器自动处理）
@@ -528,18 +581,18 @@ class SQLiteMemoryRepository(MemoryRepository):
             # 或者使用 TRUNCATE（SQLite 不支持，用 DELETE 即可）
             self.conn.commit()
 
-            # 遍历所有 .md 重新插入
-            for layer_dir in self.data_root.iterdir():
-                if not layer_dir.is_dir() or layer_dir.name in ("governance", "index"):
-                    continue
-                for md_file in layer_dir.glob("*.md"):
-                    try:
-                        memory = read_memory_object(md_file)
-                        self._insert_memory(memory)
-                    except Exception as e:
-                        # 记录错误但继续
-                        # Phase 1A 简单处理：抛出异常或记录
-                        raise PersistenceError(f"重建索引失败: {md_file} - {e}")
+            for memory in markdown_memories:
+                without_links = memory.model_copy(
+                    update={"supersedes": None, "superseded_by": None}
+                )
+                self._insert_memory(without_links)
+
+            for memory in markdown_memories:
+                self.conn.execute(
+                    "UPDATE memories SET supersedes = ?, superseded_by = ? WHERE id = ?",
+                    (memory.supersedes, memory.superseded_by, memory.id),
+                )
+            self.conn.commit()
         else:
             # 仅重建指定 ID
             for memory_id in force_ids:
@@ -608,6 +661,71 @@ class SQLiteMemoryRepository(MemoryRepository):
         finally:
             conn.close()
 
+    @staticmethod
+    def _condition_filter_values(condition_filter: dict) -> List[str]:
+        if "key" in condition_filter:
+            return [condition_filter["value"]]
+        return [clause["value"] for clause in condition_filter["clauses"]]
+
+    def _search_condition_candidates(
+        self,
+        need: MemoryNeed,
+        statuses: List[MemoryStatus],
+        limit: int,
+    ) -> List[MemoryObject]:
+        """FTS5 coarse recall with hard filters for Contract §7 P-04."""
+        # 精确过滤值比自然语言关键词更具选择性。例如 jieba 会把 room_5
+        # 拆成 room，并把 condition_topic_5 拆成高频的 condition/topic；
+        # 用这些宽泛 token 做 OR 会迫使 FTS 为数千条记录计算 BM25。粗筛以
+        # condition values 为准，完整 query keywords 仍用于后续相关性排名。
+        terms = self._condition_filter_values(need.condition_filter or {})
+        if not any(term.strip() for term in terms):
+            terms = list(need.keywords or [])
+        terms = list(dict.fromkeys(term.strip() for term in terms if term.strip()))
+        if not terms:
+            return []
+
+        fts_query = " OR ".join(
+            f'"{term.replace(chr(34), chr(34) * 2)}"*' for term in terms
+        )
+        status_placeholders = ",".join("?" for _ in statuses)
+        sql = f"""
+            WITH fts_hits(rowid, bm25_score) AS MATERIALIZED (
+                SELECT rowid, bm25(memories_fts)
+                FROM memories_fts
+                WHERE memories_fts MATCH ?
+            )
+            SELECT m.*
+            FROM fts_hits
+            JOIN memories m ON m.rowid = fts_hits.rowid
+            WHERE m.status IN ({status_placeholders})
+        """
+        params: List[Any] = [fts_query, *statuses]
+
+        scope = need.scope_filter or {}
+        tenant_id = scope.get("tenant_id")
+        agent_id = scope.get("agent_id")
+        if tenant_id:
+            sql += " AND json_extract(m.source_json, '$.tenant_id') = ?"
+            params.append(tenant_id)
+        if agent_id:
+            sql += " AND json_extract(m.source_json, '$.agent_id') = ?"
+            params.append(agent_id)
+
+        if need.layers:
+            placeholders = ",".join("?" for _ in need.layers)
+            sql += f" AND m.layer IN ({placeholders})"
+            params.extend(need.layers)
+        if need.types:
+            placeholders = ",".join("?" for _ in need.types)
+            sql += f" AND m.type IN ({placeholders})"
+            params.extend(need.types)
+
+        sql += " ORDER BY fts_hits.bm25_score LIMIT ?"
+        params.append(min(limit, 100))
+        rows = self.conn.execute(sql, params).fetchall()
+        return [self._row_to_memory(row) for row in rows]
+
     def search_candidates(
         self,
         need: MemoryNeed,
@@ -627,6 +745,8 @@ class SQLiteMemoryRepository(MemoryRepository):
         中文 FTS 失败导致 Recall=0
         """
         statuses = statuses or ["active"]
+        if need.condition_filter is not None:
+            return self._search_condition_candidates(need, statuses, limit)
 
         placeholders = ",".join(["?"] * len(statuses))
 
@@ -735,7 +855,14 @@ class SQLiteMemoryRepository(MemoryRepository):
 
         # ADR-007 固定 unicode61；对中文而言，一整段连续汉字可能成为单个
         # FTS token。将命中查询片段的已索引字段扩展成完整 phrase，避免把
-        # BM25 旁路成 Python 子串分数，同时保持中文召回。
+        # BM25 旁路成 Python 子串分数，同时保持中文召回。ASCII/数字 token
+        # 已由 unicode61 正常切分，禁止触发整字段扩展，否则会把候选池膨胀成
+        # 近百个长 OR phrase，破坏 10k 规模下的延迟。
+        cjk_terms = [
+            term
+            for term in terms
+            if any("\u3400" <= character <= "\u9fff" for character in term)
+        ]
         placeholders = ",".join(["?"] * len(memory_ids))
         expansion_sql = f"""
             SELECT content, subject, predicate, object, tags_json
@@ -743,11 +870,18 @@ class SQLiteMemoryRepository(MemoryRepository):
             WHERE id IN ({placeholders})
         """
         expanded_terms = list(terms)
-        for row in self.conn.execute(expansion_sql, memory_ids).fetchall():
-            for field in ("content", "subject", "predicate", "object", "tags_json"):
-                value = (row[field] or "").strip()
-                if value and any(term in value for term in terms):
-                    expanded_terms.append(value)
+        if cjk_terms:
+            for row in self.conn.execute(expansion_sql, memory_ids).fetchall():
+                for field in (
+                    "content",
+                    "subject",
+                    "predicate",
+                    "object",
+                    "tags_json",
+                ):
+                    value = (row[field] or "").strip()
+                    if value and any(term in value for term in cjk_terms):
+                        expanded_terms.append(value)
         terms = list(dict.fromkeys(expanded_terms))
 
         # unicode61 不会按中文词边界切分，因此同时保留紧凑原词并使用
@@ -774,7 +908,7 @@ class SQLiteMemoryRepository(MemoryRepository):
     def query_active(self, need: MemoryNeed, scope_filter: Optional[dict] = None) -> List[MemoryObject]:
         # 将 scope_filter 合并到 need（暂时修改 need 对象，但不建议）
         # 更好的方式：复制 need 并更新 scope_filter
-        need_copy = need.copy(deep=True)
+        need_copy = need.model_copy(deep=True)
         need_copy.scope_filter = scope_filter or need_copy.scope_filter
         return self.search_candidates(need_copy, statuses=["active"], limit=need.max_results or 100)
 
@@ -785,16 +919,37 @@ class SQLiteMemoryRepository(MemoryRepository):
         return self.search_candidates(need, statuses=[status], limit=limit)
     
     def check_consistency(self) -> ConsistencyReport:
-        """遍历 Markdown SoT，与 SQLite 比对，返回一致性报告。"""
+        """遍历 Markdown SoT，并与 SQLite 主表及 FTS5 词项索引比对。"""
         missing_in_index = []
         orphan_in_index = []
         checksum_mismatch = []  # Phase 1A 暂不比较内容
 
-        # 1. 从 SQLite 读取所有 memory id
+        # 1. 从 SQLite 读取所有 memory id / rowid
         existing_ids = set()
-        cursor = self.conn.execute("SELECT id FROM memories")
+        memory_id_by_rowid = {}
+        expected_fts_rowids = set()
+        cursor = self.conn.execute(
+            "SELECT rowid, id, content, subject, predicate, object, tags_json "
+            "FROM memories"
+        )
         for row in cursor.fetchall():
-            existing_ids.add(row['id'])
+            existing_ids.add(row["id"])
+            memory_id_by_rowid[row["rowid"]] = row["id"]
+            indexed_text = " ".join(
+                str(row[field] or "")
+                for field in (
+                    "content",
+                    "subject",
+                    "predicate",
+                    "object",
+                    "tags_json",
+                )
+            )
+            # unicode61 indexes Unicode letters/numbers. A valid record whose
+            # indexed fields contain punctuation only legitimately has no vocab
+            # row and must not be reported as a missing FTS document.
+            if any(character.isalnum() for character in indexed_text):
+                expected_fts_rowids.add(row["rowid"])
 
         # 2. 遍历所有 layer 目录下的 .md 文件
         md_ids = set()
@@ -815,11 +970,39 @@ class SQLiteMemoryRepository(MemoryRepository):
             if idx_id not in md_ids:
                 orphan_in_index.append(idx_id)
 
-        # 4. 确定状态
-        if missing_in_index or orphan_in_index:
+        # 4. 检查真正的 FTS 词项索引。直接 SELECT memories_fts 在 external
+        # content 模式下会读取 memories 主表，无法发现词项被删；fts5vocab 才能
+        # 枚举实际存在于倒排索引中的文档 rowid。
+        try:
+            self.conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS temp.memories_fts_vocab "
+                "USING fts5vocab('main', 'memories_fts', 'instance')"
+            )
+            indexed_rowids = {
+                row["doc"]
+                for row in self.conn.execute(
+                    "SELECT DISTINCT doc FROM temp.memories_fts_vocab"
+                ).fetchall()
+            }
+            for rowid in expected_fts_rowids:
+                memory_id = memory_id_by_rowid[rowid]
+                if rowid not in indexed_rowids and memory_id not in missing_in_index:
+                    missing_in_index.append(memory_id)
+            for rowid in indexed_rowids - set(memory_id_by_rowid):
+                orphan_in_index.append(f"fts-rowid:{rowid}")
+        except sqlite3.Error as exc:
+            checksum_mismatch.append("fts5:index_unreadable")
+            logger.error("FTS5 一致性检查失败: %s", exc)
+
+        # 5. 确定状态
+        if missing_in_index or orphan_in_index or checksum_mismatch:
             # 如果缺失或孤儿，尝试修复（自动修复在 rebuild_index 中）
             status = "critical"
-            critical_details = f"缺失 {len(missing_in_index)} 个，孤儿 {len(orphan_in_index)} 个"
+            critical_details = (
+                f"缺失 {len(missing_in_index)} 个，"
+                f"孤儿 {len(orphan_in_index)} 个，"
+                f"索引错误 {len(checksum_mismatch)} 个"
+            )
         else:
             status = "healthy"
             critical_details = None

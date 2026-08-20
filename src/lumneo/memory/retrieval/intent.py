@@ -185,6 +185,7 @@ def analyze_intent(
     # Keywords
     # ======================================================
     keywords = extract_keywords(query)
+    condition_filter = context.get("condition_filter") if context else None
 
     return MemoryNeed(
         layers=layers,
@@ -193,5 +194,6 @@ def analyze_intent(
         subject_hint=subject_hint,
         max_results=20,
         scope_filter=None,
+        condition_filter=condition_filter,
         include_historical=include_historical,
     )

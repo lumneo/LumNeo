@@ -71,7 +71,49 @@ class MemoryNeed(BaseModel):
     subject_hint: Optional[str] = None
     max_results: int = Field(default=20, ge=1, le=100)
     scope_filter: Optional[dict[str, Any]] = None
+    condition_filter: Optional[dict[str, Any]] = None
     include_historical: bool = False
+
+    @field_validator("condition_filter")
+    @classmethod
+    def validate_condition_filter(
+        cls,
+        value: Optional[dict[str, Any]],
+    ) -> Optional[dict[str, Any]]:
+        if value is None:
+            return None
+        if not value:
+            raise ValueError("condition_filter 不能为空 dict")
+
+        if "key" in value and "value" in value:
+            if set(value) != {"key", "value"}:
+                raise ValueError("单条件只允许 key 和 value 字段")
+            if not isinstance(value["key"], str) or not isinstance(
+                value["value"], str
+            ):
+                raise ValueError("condition_filter key/value 必须为字符串")
+            return value
+
+        if value.get("operator") == "AND":
+            if set(value) != {"operator", "clauses"}:
+                raise ValueError("AND 只允许 operator 和 clauses 字段")
+            clauses = value.get("clauses")
+            if not isinstance(clauses, list) or not clauses:
+                raise ValueError("AND 必须包含非空 clauses")
+            if len(clauses) > 5:
+                raise ValueError("AND clauses 数量不能超过 5")
+            for clause in clauses:
+                if not isinstance(clause, dict) or set(clause) != {"key", "value"}:
+                    raise ValueError("每个 clause 必须仅包含 key 和 value")
+                if not isinstance(clause["key"], str) or not isinstance(
+                    clause["value"], str
+                ):
+                    raise ValueError("clause key/value 必须为字符串")
+            return value
+
+        if "operator" in value:
+            raise ValueError("condition_filter 仅支持 AND")
+        raise ValueError("condition_filter 结构非法")
 
     model_config = {"extra": "forbid"}
 
