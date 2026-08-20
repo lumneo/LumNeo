@@ -1,6 +1,8 @@
 aiofiles>=25.1.0
 fastapi>=0.141.1
+jieba>=0.42.1
 uvicorn[standard]>=0.52.1
+pytest>=9.1.1
 pywebview>=6.2.1
 openai>=2.53.0
 python-dotenv>=1.2.2
@@ -10,5 +12,6 @@ pandas>=3.0.5
 xlrd>=2.0.2
 chardet>=7.5.1
 markitdown[all]>=0.1.7
+rapidfuzz>=3.14.5
 requests>=2.34.2
 pyinstaller>=6.21.0
