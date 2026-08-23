@@ -3,3 +3,6 @@
 from . import registry
 from . import system
 from . import execution
+from .hardware import HardwareExecuteTool, register_hardware_tool
+
+__all__ = ("HardwareExecuteTool", "register_hardware_tool")

@@ -8,6 +8,7 @@ from lumneo.persistence.models.tool_call import ToolCallModel
 from lumneo.persistence.models.skill import SkillModel
 from lumneo.persistence.models.decision import DecisionModel
 from lumneo.persistence.models.plan import PlanModel
+from .hardware import HARDWARE_TABLES, SCHEMA_VERSION
 
 __all__ = [
     "ChatModel",
@@ -18,4 +19,6 @@ __all__ = [
     "SkillModel",
     "DecisionModel",
     "PlanModel",
+    "HARDWARE_TABLES",
+    "SCHEMA_VERSION",
 ]
