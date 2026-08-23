@@ -24,3 +24,17 @@ static_dir: "html"
 
 # 其他配置
 max_upload_size_mb: 100
+
+# ========== MemoryOS 配置 ==========
+memory:
+  # 记忆数据根目录（相对于 data_dir，或绝对路径）
+  data_dir: "data/memory"
+  # FTS5 数据库文件名（位于 memory/data_dir/index/ 下）
+  index_db: "fts5.db"
+  # 检索相关参数（预留）
+  retrieval:
+    alpha: 0.65
+    decay_coefficient: 0.05
+  # 治理相关参数（预留）
+  governance:
+    review_timeout_days: 7

@@ -1,0 +1,11 @@
+# 置信度黄金测试用例（A.2/A.6）
+- description: "1条 explicit_statement，置信度应为 0.71"
+  evidence:
+    - type: explicit_statement
+      weight: 1.0
+      source:
+        message_id: "msg_001"
+        chat_id: "chat_001"
+      provenance_key: "msg_001"
+  expected_confidence: 0.714  # 约 0.71
+  expected_status: active

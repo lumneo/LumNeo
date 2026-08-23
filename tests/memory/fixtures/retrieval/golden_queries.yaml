@@ -1,0 +1,10 @@
+# 检索黄金测试用例（A.5）
+- query: "美式咖啡"
+  existing_memories:
+    - id: mem_001
+      content: "用户喜欢美式咖啡"
+      status: active
+      confidence: 0.87
+      importance: 4
+      last_accessed: null
+  expected_top_3_ids: ["mem_001"]

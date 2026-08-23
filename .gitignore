@@ -30,6 +30,8 @@ apps/desktop/stats.html
 apps/desktop/package-lock.json
 *.local
 
+.pytest_cache
+
 mcp_config.json
 *.spec
 
